@@ -1,72 +1,99 @@
-// X-Wallet v1.5.9-root — canonical build (networks, balances, tx history, SafeSend modal, ≥90 hard block)
-
-(async function () {
+/* X-Wallet Web — app.js v1.5.9
+   - Modal always shows for risk review
+   - Hard block >= 90 (or block:true) → “Return to Wallet(s)”
+   - Warn band 65–89 requires checkbox to proceed
+   - Keeps all 1.5.x features (multi-network, balances, txs, vault)
+*/
+(function () {
   /* ================= CONFIG ================= */
   const CONFIG = {
-    VERSION: "v1.5.9-root",
-    ALCHEMY_KEY: "kxHg5y9yBXWAb9cOcJsf0", // <-- replace if needed
+    ALCHEMY_KEY: "kxHg5y9yBXWAb9cOcJsf0", // set your key
     SAFE_SEND_ORG: "https://xwalletv1dot2.agedotcom.workers.dev",
     CHAINS: {
-      ethereum: { id:1, label:"Ethereum Mainnet",  nativeSymbol:"ETH",  rpc:(k)=>`https://eth-mainnet.g.alchemy.com/v2/${k}`,  explorer:"https://etherscan.io" },
-      sepolia:  { id:11155111, label:"Ethereum Sepolia (testnet)", nativeSymbol:"ETH", rpc:(k)=>`https://eth-sepolia.g.alchemy.com/v2/${k}`, explorer:"https://sepolia.etherscan.io" },
-      polygon:  { id:137, label:"Polygon", nativeSymbol:"MATIC", rpc:(k)=>`https://polygon-mainnet.g.alchemy.com/v2/${k}`, explorer:"https://polygonscan.com" },
-      base:     { id:8453, label:"Base", nativeSymbol:"ETH", rpc:(k)=>`https://base-mainnet.g.alchemy.com/v2/${k}`, explorer:"https://basescan.org" },
-      optimism: { id:10, label:"Optimism", nativeSymbol:"ETH", rpc:(k)=>`https://opt-mainnet.g.alchemy.com/v2/${k}`, explorer:"https://optimistic.etherscan.io" }
-    }
+      ethereum: { id: 1, label: "Ethereum Mainnet", nativeSymbol: "ETH",
+        rpc: (k) => `https://eth-mainnet.g.alchemy.com/v2/${k}`, explorer: "https://etherscan.io" },
+      sepolia: { id: 11155111, label: "Ethereum Sepolia (testnet)", nativeSymbol: "ETH",
+        rpc: (k) => `https://eth-sepolia.g.alchemy.com/v2/${k}`, explorer: "https://sepolia.etherscan.io" },
+      polygon: { id: 137, label: "Polygon", nativeSymbol: "MATIC",
+        rpc: (k) => `https://polygon-mainnet.g.alchemy.com/v2/${k}`, explorer: "https://polygonscan.com" },
+      base: { id: 8453, label: "Base", nativeSymbol: "ETH",
+        rpc: (k) => `https://base-mainnet.g.alchemy.com/v2/${k}`, explorer: "https://basescan.org" },
+      optimism: { id: 10, label: "Optimism", nativeSymbol: "ETH",
+        rpc: (k) => `https://opt-mainnet.g.alchemy.com/v2/${k}`, explorer: "https://optimistic.etherscan.io" },
+    },
   };
 
+  // Risk thresholds
+  const THRESH_WARN = 65;   // 65–89 => warning + checkbox
+  const THRESH_BLOCK = 90;  // >=90  => hard block
+
   /* ================= STATE ================== */
-  let ethers = null;              // will be set by dynamic import
+  let ethers = null;     // set by dynamic import
   let provider = null;
+
   const state = {
     unlocked: false,
     chainKey: localStorage.getItem("xw.chain") || "sepolia",
     decryptedPhrase: null,
-    accounts: [],               // [{index, wallet, address}]
+    accounts: [],            // [{index, wallet, address}]
     signerIndex: 0,
     pendingTx: null,
-    lastRisk: null
+    lastRisk: null,
   };
+
+  /* =============== DEBUG BAR ================= */
+  const dbg = (function makeDebugBar () {
+    const el = document.createElement("div");
+    el.id = "xw-debug";
+    el.style.cssText = "position:fixed;left:10px;bottom:10px;padding:6px 8px;border-radius:8px;background:#0b1220;border:1px solid #263040;color:#9aa4b2;font:12px/1.2 system-ui;z-index:9999;opacity:.9";
+    el.textContent = "X-Wallet: booting…";
+    document.addEventListener("DOMContentLoaded", () => document.body.appendChild(el));
+    return (msg) => { const d = document.getElementById("xw-debug"); if (d) d.textContent = `X-Wallet: ${msg}`; };
+  })();
+
+  const $  = (q, el=document)=> el.querySelector(q);
+  const $$ = (q, el=document)=> [...el.querySelectorAll(q)];
+  const fmt = (n)=> Number(n).toLocaleString(undefined,{maximumFractionDigits:6});
+  const clamp = (n,a=0,b=100)=> Math.max(a, Math.min(b, n));
+  const host = (u)=> { try { return new URL(u).host; } catch { return u; } };
+
+  function safe(fn){ try{ fn(); }catch(e){ console.warn(e); } }
 
   /* ============ DYNAMIC ETHERS LOAD ============ */
   async function ensureEthersLoaded(){
     if (ethers) return true;
     try {
+      dbg("loading ethers…");
       const mod = await import("https://esm.sh/ethers@6.13.2?bundle");
       ethers = mod.ethers || mod.default || mod;
-      console.log("X-Wallet front-end loaded:", CONFIG.VERSION, "(ethers ready)");
+      dbg("ethers ready");
       return true;
     } catch (e) {
       console.warn("Ethers import failed:", e);
-      console.log("X-Wallet front-end loaded:", CONFIG.VERSION, "(ethers unavailable)");
+      dbg("ethers failed to load (UI still works)");
       return false;
     }
   }
 
-  /* ============== SMALL HELPERS =============== */
-  const $  = (q, el=document)=>el.querySelector(q);
-  const $$ = (q, el=document)=>[...el.querySelectorAll(q)];
-  const fmt = (n)=>Number(n).toLocaleString(undefined,{maximumFractionDigits:6});
-  const clamp=(n,a=0,b=100)=>Math.max(a,Math.min(b,n));
-  const host = (u)=>{ try { return new URL(u).host; } catch { return u; } };
-
+  /* ============== NETWORK ===================== */
   function setChain(chainKey){
     if (!CONFIG.CHAINS[chainKey]) return;
     state.chainKey = chainKey;
     localStorage.setItem("xw.chain", chainKey);
-    (async () => {
+    safe(async () => {
       if (!await ensureEthersLoaded()) { provider = null; return; }
       provider = new ethers.JsonRpcProvider(CONFIG.CHAINS[chainKey].rpc(CONFIG.ALCHEMY_KEY));
-      refreshOpenView();
-    })();
+    });
     const sel = $("#networkSelect");
     if (sel && sel.value !== chainKey) sel.value = chainKey;
+    refreshOpenView();
   }
 
   function populateTopNetworkSelect(){
     const sel = $("#networkSelect");
     if (!sel) return;
-    sel.innerHTML = Object.keys(CONFIG.CHAINS).map(k=>`<option value="${k}">${CONFIG.CHAINS[k].label}</option>`).join("");
+    sel.innerHTML = Object.keys(CONFIG.CHAINS)
+      .map(k=>`<option value="${k}">${CONFIG.CHAINS[k].label}</option>`).join("");
     sel.value = state.chainKey in CONFIG.CHAINS ? state.chainKey : "sepolia";
     sel.addEventListener("change", e => setChain(e.target.value));
   }
@@ -79,7 +106,10 @@
     state.accounts=[]; state.signerIndex=0; state.pendingTx=null; state.lastRisk=null;
     const ls=$("#lockState"); if(ls) ls.textContent="Locked";
   }
-  function scheduleAutoLock(){ clearTimeout(window._inactivityTimer); window._inactivityTimer = setTimeout(()=>{ lock(); showLock(); }, 10*60*1000); }
+  function scheduleAutoLock(){
+    clearTimeout(window._inactivityTimer);
+    window._inactivityTimer = setTimeout(()=>{ lock(); showLock(); }, 10*60*1000);
+  }
 
   /* ========= DERIVATION (lazy ethers) ========= */
   function deriveAccountFromPhrase(phrase,index){
@@ -91,12 +121,12 @@
     state.accounts = [];
     const n = Number(localStorage.getItem("xwallet_accounts_n")||"1");
     for (let i=0; i<n; i++){
-      const w=deriveAccountFromPhrase(phrase,i);
-      state.accounts.push({index:i,wallet:w,address:w.address});
+      const w = deriveAccountFromPhrase(phrase,i);
+      state.accounts.push({index:i, wallet:w, address:w.address});
     }
   }
 
-  /* ================ VIEWS ===================== */
+  /* ================= VIEWS ==================== */
   const VIEWS = {
     dashboard(){
       const hasVault = !!localStorage.getItem("xwallet_vault_v13");
@@ -141,7 +171,6 @@
         ${manage}
       `;
     },
-
     wallets(){
       const native = CONFIG.CHAINS[state.chainKey].nativeSymbol;
       const rows = state.accounts.map(a=>`<tr><td>${a.index+1}</td><td class="mono">${a.address}</td><td id="bal-${a.index}">—</td></tr>`).join("");
@@ -157,13 +186,12 @@
         <div id="erc20List" class="small">—</div>
       `;
     },
-
     send(){
       const net = CONFIG.CHAINS[state.chainKey];
-      const acctOpts = state.accounts.map(a=>`<option value="${a.index}" ${a.index===state.signerIndex?"selected":""}>
-        Wallet #${a.index+1} — ${a.address.slice(0,6)}…${a.address.slice(-4)}
-      </option>`).join("") || "<option disabled>No wallets</option>";
-
+      const acctOpts = state.accounts.map(a=>`
+        <option value="${a.index}" ${a.index===state.signerIndex?"selected":""}>
+          Wallet #${a.index+1} — ${a.address.slice(0,6)}…${a.address.slice(-4)}
+        </option>`).join("") || "<option disabled>No wallets</option>";
       return `
         <div class="label">Send (${net.label})</div>
         <div class="send-form">
@@ -172,21 +200,14 @@
           <input id="sendAmt" placeholder="Amount (${net.nativeSymbol})"/>
           <button class="btn primary" id="doSend">Send</button>
         </div>
-        <div id="sendOut" class="small" style="margin-top:8px"></div>
+        <div id="sendOut" class="small"></div>
         <hr class="sep"/>
         <div class="grid-2">
-          <div>
-            <div class="label">Your last 10 transfers</div>
-            <div id="txList" class="small">—</div>
-          </div>
-          <div>
-            <div class="label">Recipient recent transfers</div>
-            <div id="rxList" class="small">—</div>
-          </div>
+          <div><div class="label">Your last 10 transfers</div><div id="txList" class="small">—</div></div>
+          <div><div class="label">Recipient recent transfers</div><div id="rxList" class="small">—</div></div>
         </div>
       `;
     },
-
     settings(){
       return `<div class="label">Settings</div>
         <button class="btn" id="wipe">Delete vault (local)</button>`;
@@ -197,7 +218,6 @@
     const root = $("#view");
     root.innerHTML = VIEWS[view] ? VIEWS[view]() : "Not found";
 
-    // dashboard buttons
     if (view==="dashboard"){
       $("#gen")?.addEventListener("click", async ()=>{
         if (!await ensureEthersLoaded()) return alert("Network blocked ethers. Try again or check CSP.");
@@ -230,36 +250,40 @@
       });
     }
 
-    // wallets
-    if (view==="wallets"){ loadWalletBalances().catch(()=>{}); loadERC20Balances().catch(()=>{}); }
+    if (view==="wallets"){ safe(loadWalletBalances); safe(loadERC20Balances); }
 
-    // send
     if (view==="send"){
       $("#fromAccount")?.addEventListener("change", e=>{
-        state.signerIndex = Number(e.target.value);
-        loadRecentTxs().catch(()=>{});
+        state.signerIndex = Number(e.target.value); safe(loadRecentTxs);
       });
       $("#doSend")?.addEventListener("click", sendEthFlow);
+
       const toEl = $("#sendTo");
-      const updateRx = ()=> loadAddressTxs(toEl.value.trim(),"rxList").catch(()=>{});
+      const updateRx = ()=> safe(()=>loadAddressTxs(toEl.value.trim(),"rxList"));
       toEl?.addEventListener("input",()=>{ if (/^0x[a-fA-F0-9]{40}$/.test(toEl.value.trim())) updateRx(); });
       toEl?.addEventListener("blur", updateRx);
-      loadRecentTxs().catch(()=>{});
-      updateRx();
+
+      safe(loadRecentTxs); updateRx();
     }
 
-    // settings
     if (view==="settings"){
       $("#wipe")?.addEventListener("click", ()=>{
-        if (confirm("Delete vault?")) { localStorage.clear(); lock(); alert("Deleted. Reload."); }
+        if (confirm("Delete vault?")){ localStorage.clear(); lock(); alert("Deleted. Reload."); }
       });
     }
   }
 
-  function refreshOpenView(){ const active = document.querySelector(".sidebar .item.active")?.dataset?.view || "dashboard"; render(active); }
-  function selectItem(v){ $$(".sidebar .item").forEach(x=>x.classList.toggle("active", x.dataset.view===v)); render(v); }
+  function refreshOpenView(){
+    const active = document.querySelector(".sidebar .item.active")?.dataset?.view || "dashboard";
+    render(active);
+  }
+  function selectItem(v){
+    $$(".sidebar .item").forEach(x=>x.classList.toggle("active", x.dataset.view===v));
+    render(v);
+  }
+  window.selectItem = selectItem; // used by risk modal flow
 
-  /* ===== AES vault helpers ===== */
+  /* ===== AES vault helpers ========================================== */
   async function aesEncrypt(password, plaintext){
     const enc=new TextEncoder();
     const salt=crypto.getRandomValues(new Uint8Array(16));
@@ -299,7 +323,7 @@
       const list=(res?.tokenBalances||[]).filter(tb=>tb?.tokenBalance!=="0x0").slice(0,20);
       const metas=await Promise.all(list.map(t=>provider.send("alchemy_getTokenMetadata",[t.contractAddress]).catch(()=>null)));
       return list.map((t,i)=>{
-        const m=metas[i]||{},dec=Number(m.decimals||18);
+        const m=metas[i]||{}, dec=Number(m.decimals||18);
         let raw=0n; try{ raw=BigInt(t.tokenBalance); }catch{}
         return {contract:t.contractAddress,symbol:m.symbol||"ERC20",name:m.name||"Token",decimals:dec,amount:Number(raw)/10**dec};
       }).filter(x=>x.amount>0);
@@ -307,8 +331,8 @@
   }
 
   async function loadWalletBalances(){
-    if(!state.unlocked) return;
-    if (!await ensureEthersLoaded() || !provider) { $$("#view [id^='bal-']").forEach(el=>el.textContent="—"); return; }
+    if (!state.unlocked) return;
+    if (!await ensureEthersLoaded() || !provider){ $$("#view [id^='bal-']").forEach(el=>el.textContent="—"); return; }
     const netSym=CONFIG.CHAINS[state.chainKey].nativeSymbol;
     let total=0n;
     for(const a of state.accounts){
@@ -318,11 +342,11 @@
         const c=document.getElementById(`bal-${a.index}`); if(c) c.textContent=fmt(ethers.formatEther(b));
       }catch{}
     }
-    const tb=$("#totalBal"); if(tb) tb.textContent = `Total (${netSym}): ${fmt(ethers.formatEther(total))}`;
+    const tb=$("#totalBal"); if(tb) tb.textContent=`Total (${netSym}): ${fmt(ethers.formatEther(total))}`;
   }
 
   async function loadERC20Balances(){
-    if(!state.unlocked) return;
+    if (!state.unlocked) return;
     const el=$("#erc20List"); if(!el) return;
     el.textContent="Loading…";
     const acct=state.accounts[state.signerIndex]; if(!acct){ el.textContent="No wallet selected."; return; }
@@ -367,61 +391,152 @@
     }catch(e){ console.warn(e); el.textContent="Could not load transfers for this address."; }
   }
 
-  /* ============ RISK MODAL (UI + policy) ============ */
-  function wireRiskModal(){
-    $("#riskClose")?.addEventListener("click", closeRiskModal);
-    $("#riskCancel")?.addEventListener("click", closeRiskModal);
-    $("#riskProceed")?.addEventListener("click", doProceedAfterRisk);
-  }
-  function openRiskModal(){
-    const m=$("#riskModal"); if(!m) return;
-    m.classList.add("active"); m.setAttribute("aria-hidden","false");
-    setRiskScore(0); setRiskFactors([]); showWarning(""); setProceedEnabled(false);
-  }
-  function closeRiskModal(){ const m=$("#riskModal"); if(!m) return; m.classList.remove("active"); m.setAttribute("aria-hidden","true"); }
-  function setRiskScore(score){
-    const s=clamp(Math.round(score||0),0,100);
-    $("#riskMeterBar")?.style.setProperty("--score", s);
-    const txt=$("#riskScoreText"); if(txt) txt.textContent=`Risk score: ${s}`;
-  }
-  function setRiskFactors(factors){
-    const panel=$("#riskFactors"); if(!panel) return;
-    if(!factors?.length){ panel.innerHTML=`<div class="muted small">No notable factors.</div>`; return; }
-    panel.innerHTML = factors.map(f=>{
-      const label = typeof f==="string" ? f : (f?.label || f?.reason || "Signal");
-      const sev = (typeof f==="object" ? (f.severity||f.sev||"").toLowerCase() : "");
-      const badge = sev ? `<span class="factor__badge">${sev.toUpperCase()}</span>` : "";
-      return `<div class="factor">${badge}<span>${label}</span></div>`;
-    }).join("");
-  }
-  function showWarning(html){
-    const w=$("#riskWarning"); if(!w) return;
-    if (html) { w.style.display="block"; w.innerHTML = html; }
-    else { w.style.display="none"; w.innerHTML = ""; }
-  }
-  function setProceedEnabled(en){ const b=$("#riskProceed"); if(b) b.disabled = !en; }
-
+  /* ============ SAFE SEND INTEGRATION ============ */
   async function fetchSafeSend(addr, chainKey){
-    const url = `${CONFIG.SAFE_SEND_ORG}/check?address=${encodeURIComponent(addr)}&chain=${encodeURIComponent(chainKey)}&_=${Date.now()}`;
+    const url = `${CONFIG.SAFE_SEND_ORG}/check?address=${encodeURIComponent(addr)}&chain=${encodeURIComponent(chainKey)}`;
     const controller = new AbortController(); const t=setTimeout(()=>controller.abort("risk-timeout"),8000);
     try{
       const r=await fetch(url,{cache:"no-store",signal:controller.signal});
       if(!r.ok) throw new Error("SafeSend HTTP "+r.status);
-      return await r.json(); // expects { risk_score or score, reasons/risk_factors, block? }
+      return await r.json(); // { risk_score, block, reasons, risk_factors, ... }
     }catch(e){
       console.warn("SafeSend fallback", e);
-      return { score: 35, reasons:["Risk service unavailable"] };
+      return { score: 35, decision: "allow", factors: [{severity:"low",label:"Risk service unavailable"}] };
     }finally{ clearTimeout(t); }
   }
 
-  function normalizeRisk(j){
-    if (typeof j?.risk_score === "number")
-      return { score:j.risk_score, factors:j.risk_factors||j.reasons||[], blocked:!!j.block };
-    if (typeof j?.score === "number")
-      return { score:j.score, factors:j.findings||[], blocked:!!j.block };
-    return { score:35, factors:["Risk service unavailable"], blocked:false };
+  async function fetchEnrichment(addr, chainKey){
+    const url = `${CONFIG.SAFE_SEND_ORG}/analytics?address=${encodeURIComponent(addr)}&chain=${encodeURIComponent(chainKey)}`;
+    const controller = new AbortController(); const t=setTimeout(()=>controller.abort("analytics-timeout"),3000);
+    try{
+      const r=await fetch(url,{cache:"no-store",signal:controller.signal});
+      if(!r.ok) return null;
+      return await r.json();
+    }catch{ return null; } finally{ clearTimeout(t); }
   }
 
+  function mergeRisk(server, enrich){
+    // Normalize
+    const baseScore = Number(server?.risk_score ?? server?.score ?? 0);
+    let score = clamp(Math.round(baseScore), 0, 100);
+    const factors = [...(server?.risk_factors || server?.factors || [])];
+
+    // Example enrich merges (safe bonuses)
+    const ofac = server?.matched_in?.ofac || server?.reasons?.includes?.("OFAC") || enrich?.sanctions?.hit;
+    if (ofac && score < 100){ score = 100; if(!factors.includes("OFAC/sanctions list match")) factors.push("OFAC/sanctions list match"); }
+
+    return { score, factors, block: !!server?.block };
+  }
+
+  /* ============ RISK MODAL UI ============ */
+  function setRiskScore(score){
+    const s = clamp(Math.round(score || 0), 0, 100);
+    $("#riskMeterBar")?.style.setProperty("--score", s);
+    const txt = $("#riskScoreText"); if (txt) txt.textContent = `Risk score: ${s}`;
+  }
+
+  function setRiskFactors(factors){
+    const panel = $("#riskFactors");
+    if (!panel) return;
+    if (!factors || !factors.length){
+      panel.innerHTML = `<div class="muted small">No notable factors.</div>`;
+      return;
+    }
+    panel.innerHTML = factors.map(f=>{
+      const label = typeof f === "string" ? f : (f?.label || f?.reason || "Signal");
+      return `<div class="factor">${label}</div>`;
+    }).join("");
+  }
+
+  function openRiskModal(){
+    const m = $("#riskModal"); if (!m) return;
+    m.classList.add("active"); m.setAttribute("aria-hidden","false");
+    // reset
+    setRiskScore(0); setRiskFactors([]);
+    const warn = $("#riskWarning");
+    const agree = $("#riskAgree");
+    const proceed = $("#riskProceed");
+    if (warn) warn.style.display = "none";
+    if (agree){ agree.checked = false; agree.disabled = true; }
+    if (proceed){ proceed.disabled = true; proceed.textContent = "Complete transaction"; proceed.dataset.action = "proceed"; }
+  }
+
+  function closeRiskModal(){
+    const m = $("#riskModal"); if (!m) return;
+    m.classList.remove("active"); m.setAttribute("aria-hidden","true");
+  }
+
+  function applyRiskPolicyUI(result){
+    const score    = Number(result?.score ?? result?.risk_score ?? 0);
+    const hard     = (result?.block === true) || (score >= THRESH_BLOCK);
+    const warnBand = !hard && score >= THRESH_WARN;
+
+    setRiskScore(score);
+    setRiskFactors(result?.factors || result?.risk_factors || []);
+
+    const warnBox = $("#riskWarning");
+    const agree   = $("#riskAgree");
+    const proceed = $("#riskProceed");
+    if (!warnBox || !agree || !proceed) return;
+
+    if (hard){
+      warnBox.style.display = "block";
+      warnBox.innerHTML =
+        `Transfers to the wallet address you submitted are currently being blocked. ` +
+        `RiskXLabs believes that transactions with this wallet represent substantial risk ` +
+        `or that the address has been sanctioned by regulatory bodies.`;
+      agree.checked = false; agree.disabled = true;
+      proceed.textContent = "Return to Wallet(s)";
+      proceed.dataset.action = "return";
+      proceed.disabled = false;
+      return;
+    }
+
+    if (warnBand){
+      warnBox.style.display = "block";
+      warnBox.innerHTML =
+        `This transaction has elevated risk. Acknowledge the warning to proceed. ` +
+        `You assume full financial responsibility for ignoring the stated risk factors.`;
+      agree.disabled = false;
+      proceed.textContent = "Complete transaction";
+      proceed.dataset.action = "proceed";
+      proceed.disabled = !agree.checked;
+      return;
+    }
+
+    // Low
+    warnBox.style.display = "none";
+    agree.checked = false; agree.disabled = true;
+    proceed.textContent = "Complete transaction";
+    proceed.dataset.action = "proceed";
+    proceed.disabled = false;
+  }
+
+  // wire checkbox + button after DOM ready
+  function wireRiskModal(){
+    $("#riskAgree")?.addEventListener("change", ()=>{
+      if (window.__lastRiskResult) applyRiskPolicyUI(window.__lastRiskResult);
+    });
+    $("#riskProceed")?.addEventListener("click", async ()=>{
+      const action = $("#riskProceed")?.dataset?.action;
+      if (action === "return"){
+        closeRiskModal();
+        const out = $("#sendOut");
+        if (out && window.__lastRiskResult){
+          const s = Number(window.__lastRiskResult.score ?? window.__lastRiskResult.risk_score ?? 0);
+          out.textContent = `Blocked by policy (score ${s}).`;
+        }
+        if (typeof selectItem === "function") selectItem("wallets");
+        return;
+      }
+      // proceed path
+      if (typeof doProceedAfterRisk === "function") await doProceedAfterRisk();
+    });
+    $("#riskCancel")?.addEventListener("click", closeRiskModal);
+    $("#riskClose")?.addEventListener("click", closeRiskModal);
+  }
+
+  /* ============ SEND FLOW ============ */
   async function sendEthFlow(){
     const to = $("#sendTo")?.value.trim();
     const amt = $("#sendAmt")?.value.trim();
@@ -433,77 +548,78 @@
     openRiskModal();
 
     try{
-      const raw = await fetchSafeSend(to, state.chainKey);
-      const risk = normalizeRisk(raw);
-      state.lastRisk = risk;
-      setRiskScore(risk.score);
-      setRiskFactors(risk.factors);
+      const server  = await fetchSafeSend(to, state.chainKey);
+      const enrich  = await fetchEnrichment(to, state.chainKey);
+      const result  = mergeRisk(server, enrich);
+      state.lastRisk = result;
+      window.__lastRiskResult = result;
 
-      if (risk.score >= 90 || risk.blocked) {
-        // HARD BLOCK
-        showWarning(
-          `RiskXLabs is blocking transactions to this address because we have detected an elevated level of risk or
-           regulatory action regarding this address.`
-        );
-        setProceedEnabled(false);
-        $("#sendOut").textContent = `Blocked by policy (score ${risk.score}).`;
-      } else if (risk.score >= 70) {
-        // High, allow with acknowledgement (we keep it simple: enable proceed)
-        showWarning(`High risk detected. Proceed only if you understand the risks.`);
-        setProceedEnabled(true);
-        $("#sendOut").textContent = `Risk score ${risk.score}. High risk — acknowledgement required.`;
-      } else {
-        // Low/medium
-        showWarning("");
-        setProceedEnabled(true);
-        $("#sendOut").textContent = `Risk score ${risk.score}. You may proceed.`;
+      applyRiskPolicyUI(result);
+
+      const s = result.score;
+      const out = $("#sendOut");
+      if (out){
+        if ((result.block === true) || s >= THRESH_BLOCK){
+          out.textContent = `Blocked by policy (score ${s}).`;
+        } else if (s >= THRESH_WARN){
+          out.textContent = `Risk score ${s}. Warning — acknowledgement required.`;
+        } else {
+          out.textContent = `Risk score ${s}. You may proceed.`;
+        }
       }
     }catch(e){
       console.warn(e);
-      state.lastRisk = { score: 35, factors: ["Risk check fallback applied"], blocked:false };
-      setRiskScore(35); setRiskFactors(state.lastRisk.factors); showWarning(""); setProceedEnabled(true);
+      state.lastRisk = { score: 35, factors: [{label:"Risk service timeout — default applied"}] };
+      window.__lastRiskResult = state.lastRisk;
+      applyRiskPolicyUI(state.lastRisk);
       $("#sendOut").textContent = "Risk check fallback applied.";
     }
   }
 
   async function doProceedAfterRisk(){
-    const ctx = state.pendingTx;
-    if(!ctx){ closeRiskModal(); return; }
-
-    // If we have a hard block, never proceed
-    if (state.lastRisk && (state.lastRisk.blocked || state.lastRisk.score >= 90)) {
-      return; // button should already be disabled, extra guard
+    const r = window.__lastRiskResult || state.lastRisk || {};
+    const s = Number(r.score ?? r.risk_score ?? 0);
+    if (r.block === true || s >= THRESH_BLOCK){
+      closeRiskModal();
+      $("#sendOut").textContent = `Blocked by policy (score ${s}).`;
+      if (typeof selectItem === "function") selectItem("wallets");
+      return;
     }
 
-    closeRiskModal();
     if (!await ensureEthersLoaded()) return alert("Ethers not loaded — sending disabled. Check CSP / network.");
 
     try{
-      $("#sendOut").textContent = `Sending ${ctx.amount}…`;
+      $("#sendOut").textContent = `Sending ${state.pendingTx.amount}…`;
       if (!provider) provider = new ethers.JsonRpcProvider(CONFIG.CHAINS[state.chainKey].rpc(CONFIG.ALCHEMY_KEY));
       const acct = state.accounts[state.signerIndex];
       if(!acct) throw new Error("No wallet selected");
       const signer = acct.wallet.connect(provider);
-      const tx = { to: ctx.to, value: ethers.parseEther(String(ctx.amount)) };
+
+      const tx = { to: state.pendingTx.to, value: ethers.parseEther(String(state.pendingTx.amount)) };
       const fee = await provider.getFeeData();
       if (fee?.maxFeePerGas){ tx.maxFeePerGas = fee.maxFeePerGas; tx.maxPriorityFeePerGas = fee.maxPriorityFeePerGas; }
       try { tx.gasLimit = await signer.estimateGas(tx); } catch {}
+
       const sent = await signer.sendTransaction(tx);
       const ex = CONFIG.CHAINS[state.chainKey].explorer;
       $("#sendOut").innerHTML = `Broadcasted: <a target="_blank" href="${ex}/tx/${sent.hash}">${sent.hash}</a>`;
       await sent.wait(1);
-      loadRecentTxs().catch(()=>{});
-      loadAddressTxs(ctx.to, "rxList").catch(()=>{});
-      loadWalletBalances().catch(()=>{});
+      safe(loadRecentTxs);
+      safe(()=>loadAddressTxs(state.pendingTx.to, "rxList"));
+      safe(loadWalletBalances);
     }catch(e){
       $("#sendOut").textContent = "Error: " + (e?.message || e);
     }finally{
       state.pendingTx = null;
+      closeRiskModal();
     }
   }
+  window.doProceedAfterRisk = doProceedAfterRisk; // button uses this
 
   /* =============== INIT & WIRING =============== */
   document.addEventListener("DOMContentLoaded", () => {
+    dbg("boot complete (UI ready)");
+
     // top CTA
     $("#ctaLearn")?.addEventListener("click", ()=>alert("Docs/learn more coming soon."));
     $("#ctaApp")?.addEventListener("click", ()=>selectItem("dashboard"));
@@ -521,14 +637,14 @@
         if(!v) return $("#unlockMsg").textContent="No vault found.";
         const pw=$("#unlockPassword").value;
         const payload=JSON.parse(v);
+
         if (!await ensureEthersLoaded()) return $("#unlockMsg").textContent="Ethers not loaded. Check CSP.";
-        const phrase = await (async ()=>{ // decrypt
-          const {ct,iv,salt} = payload.enc;
-          const km = await crypto.subtle.importKey("raw", new TextEncoder().encode(pw), {name:"PBKDF2"}, false, ["deriveKey"]);
-          const key=await crypto.subtle.deriveKey({name:"PBKDF2",salt:new Uint8Array(salt),iterations:100000,hash:"SHA-256"}, km, {name:"AES-GCM",length:256}, false, ["decrypt"]);
-          const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv:new Uint8Array(iv)}, key, new Uint8Array(ct));
-          return new TextDecoder().decode(pt);
-        })();
+        const {ct,iv,salt} = payload.enc;
+        const km = await crypto.subtle.importKey("raw", new TextEncoder().encode(pw), {name:"PBKDF2"}, false, ["deriveKey"]);
+        const key=await crypto.subtle.deriveKey({name:"PBKDF2",salt:new Uint8Array(salt),iterations:100000,hash:"SHA-256"}, km, {name:"AES-GCM",length:256}, false, ["decrypt"]);
+        const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv:new Uint8Array(iv)}, key, new Uint8Array(ct));
+        const phrase = new TextDecoder().decode(pt);
+
         state.decryptedPhrase = phrase;
         if (!localStorage.getItem("xwallet_accounts_n")) localStorage.setItem("xwallet_accounts_n","1");
         loadAccountsFromPhrase(phrase);
@@ -536,7 +652,9 @@
         state.unlocked = true;
         const ls=$("#lockState"); if(ls) ls.textContent="Unlocked";
         hideLock(); scheduleAutoLock(); selectItem("dashboard");
-      }catch(e){ $("#unlockMsg").textContent="Wrong password or corrupted vault."; console.error(e); }
+      }catch(e){
+        $("#unlockMsg").textContent="Wrong password or corrupted vault."; console.error(e);
+      }
     });
 
     // network select + initial render
@@ -547,5 +665,4 @@
     // risk modal wiring
     wireRiskModal();
   });
-
 })();
