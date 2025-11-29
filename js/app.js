@@ -1,17 +1,18 @@
+// ===== BASIC SAFETY =====
 if (typeof ethers === "undefined") {
   alert("Crypto library failed to load. Check the ethers.js <script> tag URL.");
   throw new Error("ethers.js not loaded");
 }
 
-// ========= STORAGE KEYS =========
+// ===== STORAGE KEYS =====
 const LS_WALLETS_KEY = "xwallet_wallets_v1";
 const SS_CURRENT_ID_KEY = "xwallet_current_wallet_id_v1";
 
-// ========= STATE =========
+// ===== STATE =====
 let wallets = [];
 let currentWalletId = null;
 
-// ========= ELEMENTS =========
+// ===== DOM ELEMENTS =====
 const walletGate = document.getElementById("walletGate");
 const gateWalletList = document.getElementById("gateWalletList");
 const gateCreateBtn = document.getElementById("gateCreateBtn");
@@ -27,6 +28,7 @@ const walletsContainer = document.getElementById("walletsContainer");
 
 const createWalletBtn = document.getElementById("createWalletBtn");
 const importWalletBtn = document.getElementById("importWalletBtn");
+const walletsNavBtn = document.getElementById("walletsNavBtn");
 
 const createWalletModal = document.getElementById("createWalletModal");
 const importWalletModal = document.getElementById("importWalletModal");
@@ -35,13 +37,17 @@ const cwMnemonicEl = document.getElementById("cwMnemonic");
 const cwAddressEl = document.getElementById("cwAddress");
 const cwLabelEl = document.getElementById("cwLabel");
 const cwConfirmBtn = document.getElementById("cwConfirmBtn");
+const cwPasswordEl = document.getElementById("cwPassword");
+const cwPasswordErrorEl = document.getElementById("cwPasswordError");
 
 const iwLabelEl = document.getElementById("iwLabel");
 const iwMnemonicEl = document.getElementById("iwMnemonic");
 const iwErrorEl = document.getElementById("iwError");
 const iwImportBtn = document.getElementById("iwImportBtn");
 
-// ========= UTIL =========
+const networkSelect = document.getElementById("networkSelect");
+
+// ===== UTIL =====
 function formatPct(p) {
   if (p === null || p === undefined) return "--";
   const sign = p > 0 ? "+" : "";
@@ -64,6 +70,12 @@ function loadWallets() {
     wallets = [];
   }
 
+  // Ensure basic shape
+  wallets.forEach((w) => {
+    if (!Array.isArray(w.holdings)) w.holdings = [];
+    if (typeof w.password === "undefined") w.password = null;
+  });
+
   const storedId = sessionStorage.getItem(SS_CURRENT_ID_KEY);
   if (storedId && wallets.some((w) => w.id === storedId)) {
     currentWalletId = storedId;
@@ -74,6 +86,10 @@ function loadWallets() {
 
 function saveWallets() {
   localStorage.setItem(LS_WALLETS_KEY, JSON.stringify(wallets));
+}
+
+function getWalletById(id) {
+  return wallets.find((w) => w.id === id);
 }
 
 function setCurrentWallet(id) {
@@ -87,12 +103,18 @@ function setCurrentWallet(id) {
   updateGateVisibility();
 }
 
-function getWalletById(id) {
-  return wallets.find((w) => w.id === id);
+function refreshHeader() {
+  const wallet = getWalletById(currentWalletId);
+  if (!wallet) {
+    walletAddressEl.textContent = "No wallet selected";
+    fiatBalanceLabelEl.textContent = "$0.00";
+    return;
+  }
+  walletAddressEl.textContent = wallet.address;
+  fiatBalanceLabelEl.textContent = formatUsd(wallet.totalUsd || 0);
 }
 
-// ========= GATE & DASHBOARD TOGGLING =========
-
+// ===== GATE & DASHBOARD =====
 function updateGateWalletList() {
   if (!wallets.length) {
     gateWalletList.hidden = true;
@@ -114,7 +136,7 @@ function updateGateWalletList() {
         <div class="wallet-address">${w.address}</div>
       </div>
       <button class="pill-btn-outline" data-gate-unlock="${w.id}">
-        Unlock with seed
+        Unlock
       </button>
     `;
     gateWalletList.appendChild(row);
@@ -137,22 +159,14 @@ function updateGateVisibility() {
   updateGateWalletList();
 }
 
-// ========= RENDER WALLET DASHBOARD =========
-
-function refreshHeader() {
-  const wallet = getWalletById(currentWalletId);
-  if (!wallet) {
-    walletAddressEl.textContent = "No wallet selected";
-    fiatBalanceLabelEl.textContent = "$0.00";
-    return;
-  }
-  walletAddressEl.textContent = wallet.address;
-  fiatBalanceLabelEl.textContent = formatUsd(wallet.totalUsd || 0);
-}
-
+// ===== RENDER WALLETS & HOLDINGS =====
 function renderWallets() {
   walletsContainer.innerHTML = "";
+
+  let total = 0;
   wallets.forEach((wallet) => {
+    total += wallet.totalUsd || 0;
+
     const card = document.createElement("article");
     card.className = "wallet-card";
     card.dataset.walletId = wallet.id;
@@ -192,9 +206,9 @@ function renderWallets() {
 
     const holdingsContainer = card.querySelector(".wallet-holdings");
     (wallet.holdings || []).forEach((h, index) => {
-      const row = document.createElement("div");
       const hChangeClass =
         h.change24hPct > 0 ? "positive" : h.change24hPct < 0 ? "negative" : "";
+      const row = document.createElement("div");
       row.className = "holding-row";
       row.dataset.walletId = wallet.id;
       row.dataset.holdingIndex = index;
@@ -231,6 +245,7 @@ function renderWallets() {
     walletsContainer.appendChild(card);
   });
 
+  fiatBalanceLabelEl.textContent = formatUsd(total);
   refreshHeader();
 }
 
@@ -254,9 +269,9 @@ walletsContainer.addEventListener("click", (e) => {
   setCurrentWallet(card.dataset.walletId);
 });
 
-// Action menu handling
+// Action menu + SafeSend stub
 document.addEventListener("click", (e) => {
-  // Close menus when clicking outside
+  // Close menus if clicked outside
   if (!e.target.closest(".holding-action")) {
     document
       .querySelectorAll(".action-menu:not([hidden])")
@@ -281,14 +296,13 @@ document.addEventListener("click", (e) => {
   const item = e.target.closest(".action-item");
   if (!item) return;
   const action = item.dataset.action;
+  menu.setAttribute("hidden", "");
 
   const holdingRow = actionContainer.closest(".holding-row");
   const walletId = holdingRow.dataset.walletId;
   const index = Number(holdingRow.dataset.holdingIndex);
   const wallet = getWalletById(walletId);
   const holding = wallet && wallet.holdings[index];
-
-  menu.setAttribute("hidden", "");
 
   if (!wallet || !holding) return;
 
@@ -299,11 +313,12 @@ document.addEventListener("click", (e) => {
   }
 });
 
-// ===== SAFE SEND HOOK =====
+// SafeSend stub (UI only)
 function startSafeSendForHolding(wallet, holding) {
-  console.log("SafeSend for", wallet.label, holding.symbol);
-  // Plug this into your existing send / SafeSend flow:
-  // openSendModal({ fromWalletId: wallet.id, assetSymbol: holding.symbol, tokenAddress: holding.tokenAddress });
+  console.log("SafeSend (stub) for", wallet.label, holding.symbol);
+  alert(
+    `SafeSend (stub): would run risk check for ${holding.symbol} from ${wallet.address}`
+  );
 }
 
 // ===== MODAL HELPERS =====
@@ -315,6 +330,7 @@ function closeModal(el) {
   el.setAttribute("hidden", "");
 }
 
+// Close modals on backdrop / close buttons
 document.addEventListener("click", (e) => {
   if (e.target.matches("[data-close-modal]")) {
     const modal = e.target.closest(".modal");
@@ -323,20 +339,21 @@ document.addEventListener("click", (e) => {
 });
 
 // ===== CREATE WALLET FLOW =====
-createWalletBtn.addEventListener("click", () => {
-  createNewWallet();
-});
-gateCreateBtn.addEventListener("click", () => {
-  createNewWallet();
-});
-
 function createNewWallet() {
   try {
     const wallet = ethers.Wallet.createRandom();
     const phrase = wallet.mnemonic && wallet.mnemonic.phrase;
+
     cwLabelEl.value = "New wallet";
     cwMnemonicEl.value = phrase || "";
     cwAddressEl.textContent = wallet.address;
+
+    if (cwPasswordEl) cwPasswordEl.value = "";
+    if (cwPasswordErrorEl) {
+      cwPasswordErrorEl.textContent = "";
+      cwPasswordErrorEl.setAttribute("hidden", "");
+    }
+
     openModal(createWalletModal);
   } catch (err) {
     console.error("Create wallet error", err);
@@ -344,41 +361,69 @@ function createNewWallet() {
   }
 }
 
+if (createWalletBtn) createWalletBtn.addEventListener("click", createNewWallet);
+if (gateCreateBtn) gateCreateBtn.addEventListener("click", createNewWallet);
+
 cwConfirmBtn.addEventListener("click", () => {
   const label = cwLabelEl.value.trim() || "New wallet";
   const phrase = cwMnemonicEl.value.trim();
   const address = cwAddressEl.textContent.trim();
+  const password = cwPasswordEl ? cwPasswordEl.value.trim() : "";
 
   if (!phrase || !address) {
     alert("Seed phrase or address missing.");
     return;
   }
+
+  if (cwPasswordErrorEl) {
+    cwPasswordErrorEl.textContent = "";
+    cwPasswordErrorEl.setAttribute("hidden", "");
+  }
+
+  if (password) {
+    const validPattern = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,}$/;
+    if (!validPattern.test(password)) {
+      if (cwPasswordErrorEl) {
+        cwPasswordErrorEl.textContent =
+          "Password must be at least 8 characters and include letters and numbers.";
+        cwPasswordErrorEl.removeAttribute("hidden");
+      } else {
+        alert(
+          "Password must be at least 8 characters and include letters and numbers."
+        );
+      }
+      return;
+    }
+  }
+
   const id = `wallet_${Date.now()}`;
   wallets.push({
     id,
     label,
     address,
+    password: password || null,
     totalUsd: 0,
     change24hPct: 0,
     holdings: []
   });
+
   saveWallets();
   closeModal(createWalletModal);
   renderWallets();
   setCurrentWallet(id);
 });
 
-// ===== IMPORT / UNLOCK WALLET =====
-importWalletBtn.addEventListener("click", () => openImport());
-gateImportBtn.addEventListener("click", () => openImport());
-
-function openImport() {
+// ===== IMPORT / UNLOCK BY SEED =====
+function openImportModal() {
   iwLabelEl.value = "";
   iwMnemonicEl.value = "";
   iwErrorEl.textContent = "";
   iwErrorEl.setAttribute("hidden", "");
   openModal(importWalletModal);
 }
+
+if (importWalletBtn) importWalletBtn.addEventListener("click", openImportModal);
+if (gateImportBtn) gateImportBtn.addEventListener("click", openImportModal);
 
 iwImportBtn.addEventListener("click", () => {
   const label = iwLabelEl.value.trim() || "Imported wallet";
@@ -407,14 +452,16 @@ iwImportBtn.addEventListener("click", () => {
     const derivedWallet = new ethers.Wallet(hd.privateKey);
     const addr = derivedWallet.address;
 
-    // See if wallet already exists (unlock case)
-    let existing = wallets.find((w) => w.address.toLowerCase() === addr.toLowerCase());
+    let existing = wallets.find(
+      (w) => w.address.toLowerCase() === addr.toLowerCase()
+    );
     if (!existing) {
       const id = `wallet_${Date.now()}`;
       existing = {
         id,
         label,
         address: addr,
+        password: null,
         totalUsd: 0,
         change24hPct: 0,
         holdings: []
@@ -434,25 +481,63 @@ iwImportBtn.addEventListener("click", () => {
   }
 });
 
-// ===== NETWORK SELECT STUB =====
-const networkSelect = document.getElementById("networkSelect");
+// ===== UNLOCK BY PASSWORD FROM GATE =====
+document.addEventListener("click", (e) => {
+  const unlockBtn = e.target.closest("[data-gate-unlock]");
+  if (!unlockBtn) return;
+
+  const walletId = unlockBtn.dataset.gateUnlock;
+  const wallet = getWalletById(walletId);
+  if (!wallet) return;
+
+  if (!wallet.password) {
+    alert(
+      "This wallet does not have a password set. Use 'Import / Unlock with 12-word seed' instead."
+    );
+    return;
+  }
+
+  const entered = prompt("Enter password for this wallet:");
+  if (entered === null) return;
+
+  if (entered.trim() !== wallet.password) {
+    alert("Incorrect password.");
+    return;
+  }
+
+  // Success
+  setCurrentWallet(wallet.id);
+  renderWallets();
+});
+
+// ===== WALLET NAV BUTTON =====
+if (walletsNavBtn) {
+  walletsNavBtn.addEventListener("click", () => {
+    // Always show gate as the wallet management hub
+    walletGate.hidden = false;
+    updateGateWalletList();
+    walletGate.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+}
+
+// ===== NETWORK SELECT (STUB) =====
 if (networkSelect) {
   networkSelect.addEventListener("change", (e) => {
-    console.log("Change network:", e.target.value);
-    // Wire into your existing RPC switch if needed
+    console.log("Change network (UI only):", e.target.value);
   });
 }
 
 // ===== INIT =====
 loadWallets();
 
-// TEMP: add dummy holdings for first wallet if none exist, so UI isn't empty
+// Seed demo wallet if none
 if (!wallets.length) {
   wallets = [
     {
       id: "demo",
       label: "Demo wallet",
       address: "0x1234...ABCD",
+      password: null,
       totalUsd: 1234.56,
       change24hPct: 1.2,
       holdings: [
@@ -464,6 +549,15 @@ if (!wallets.length) {
           usdValue: 950,
           change24hPct: 2.5,
           tokenAddress: null
+        },
+        {
+          symbol: "USDC",
+          name: "USD Coin",
+          logoUrl: "https://cryptologos.cc/logos/usd-coin-usdc-logo.png?v=032",
+          amount: 100,
+          usdValue: 100,
+          change24hPct: 0.0,
+          tokenAddress: "0x..."
         }
       ]
     }
