@@ -28,7 +28,12 @@
         </button>
 
         <!-- Wallets nav -->
-        <button class="nav-item" id="walletsNavBtn" data-view="wallets">
+        <button
+          class="nav-item"
+          id="walletsNavBtn"
+          data-view="wallets"
+          title="Manage your wallets"
+        >
           <span>Wallets</span>
         </button>
 
@@ -192,12 +197,20 @@
   <!-- Wallet Hub Popup (Create / Import / Unlock) -->
   <div id="walletHubModal" class="modal" hidden>
     <div class="modal-backdrop" data-close-modal></div>
-    <div class="modal-dialog">
+    <div class="modal-dialog wallet-hub-dialog">
       <header class="modal-header">
         <h2>Wallets</h2>
         <button class="icon-btn modal-close" data-close-modal>✕</button>
       </header>
       <div class="modal-body">
+        <!-- Hero blurb -->
+        <div class="wallet-hub-hero">
+          <h3 class="wallet-hub-hero-title">
+            Join the <span class="safesend-tv">SafeSend</span> revolution,
+            send crypto safely.
+          </h3>
+        </div>
+
         <p class="modal-text">
           Create a new wallet, import one with your 12-word seed phrase, or unlock
           a wallet you’ve previously accessed using your password.
@@ -300,6 +313,42 @@
       <footer class="modal-footer">
         <button class="ghost-btn" data-close-modal>Cancel</button>
         <button id="iwImportBtn" class="primary-btn">Import / Unlock</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- Unlock by password modal -->
+  <div id="unlockWalletModal" class="modal" hidden>
+    <div class="modal-backdrop" data-close-modal></div>
+    <div class="modal-dialog">
+      <header class="modal-header">
+        <h2>Unlock wallet</h2>
+        <button class="icon-btn modal-close" data-close-modal>✕</button>
+      </header>
+      <div class="modal-body">
+        <p class="modal-text">
+          Enter your password to unlock this wallet.
+        </p>
+
+        <div class="modal-field">
+          <label>Wallet</label>
+          <div id="uwLabel" class="address-value address-value-solid"></div>
+        </div>
+
+        <div class="modal-field">
+          <label>Address</label>
+          <div id="uwAddress" class="address-value address-value-solid"></div>
+        </div>
+
+        <div class="modal-field">
+          <label>Password</label>
+          <input id="uwPassword" class="input" type="password" />
+          <div id="uwPasswordError" class="modal-error" hidden></div>
+        </div>
+      </div>
+      <footer class="modal-footer">
+        <button class="ghost-btn" data-close-modal>Cancel</button>
+        <button id="uwConfirmBtn" class="primary-btn">Unlock</button>
       </footer>
     </div>
   </div>
