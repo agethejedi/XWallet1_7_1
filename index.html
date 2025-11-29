@@ -2,11 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>X-Wallet | RiskXLabs</title>
+  <title>RiskXLabs X-Wallet</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <!-- Main styles -->
   <link rel="stylesheet" href="css/styles.css" />
-  <!-- Ethers for wallet create/import – safe to keep even if you already include it elsewhere -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.min.js"></script>
 </head>
 <body>
@@ -55,8 +53,30 @@
 
     <!-- Main -->
     <main class="xwallet-main">
-      <!-- Top bar: network + address -->
-      <header class="xwallet-topbar">
+      <!-- Gate screen: shown when no wallet is unlocked -->
+      <section id="walletGate" class="wallet-gate">
+        <div class="wallet-gate-card">
+          <h1 class="wallet-gate-title">Welcome to RiskXLabs X-Wallet</h1>
+          <p class="wallet-gate-subtitle">
+            Start by creating a new wallet or importing one with your 12-word seed phrase.
+            When wallets on this device are locked, you can unlock them with the same seed.
+          </p>
+
+          <div id="gateWalletList" class="wallet-gate-list" hidden></div>
+
+          <div class="wallet-gate-actions">
+            <button id="gateCreateBtn" class="primary-btn">
+              Create wallet
+            </button>
+            <button id="gateImportBtn" class="pill-btn-outline">
+              Import / Unlock with 12-word seed
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Top bar: network + current wallet (shown when unlocked) -->
+      <header class="xwallet-topbar" id="walletTopbar" hidden>
         <div class="network-select-wrap">
           <label for="networkSelect">Network</label>
           <select id="networkSelect">
@@ -87,11 +107,11 @@
       </header>
 
       <!-- Hero banner -->
-      <section class="xwallet-hero">
+      <section class="xwallet-hero" id="walletHero" hidden>
         <div class="xwallet-hero-text">
-          <h1 class="xwallet-hero-title">
+          <h2 class="xwallet-hero-title">
             Xwallet powered by Risk<span class="rx-x">X</span>Labs
-          </h1>
+          </h2>
           <p class="xwallet-hero-subtitle">
             Our <span class="safesend-tv">SafeSend</span> technology helps
             protect everyone from crypto novices to the savviest of traders
@@ -101,13 +121,13 @@
         </div>
       </section>
 
-      <!-- Content grid -->
-      <section class="xwallet-content">
+      <!-- Dashboard content -->
+      <section class="xwallet-content" id="walletDashboard" hidden>
         <!-- Left: holdings by wallet -->
         <section class="panel panel-balance">
           <div class="panel-header">
             <div>
-              <h2>Total balance</h2>
+              <h3>Total balance</h3>
               <p id="fiatBalanceLabel" class="panel-subtitle">$0.00</p>
             </div>
             <div class="balance-actions">
@@ -118,15 +138,13 @@
 
           <div class="panel-body">
             <div class="wallets-header-row">
-              <h3 class="wallets-title">Holdings by wallet</h3>
+              <h4 class="wallets-title">Holdings by wallet</h4>
               <span class="wallets-hint">
                 Click <span class="wallets-plus">+</span> to view holdings.
               </span>
             </div>
 
-            <div id="walletsContainer" class="wallets-list">
-              <!-- Filled by JS -->
-            </div>
+            <div id="walletsContainer" class="wallets-list"></div>
           </div>
 
           <div class="panel-footer">
@@ -140,7 +158,7 @@
         <!-- Right: SafeSend / risk -->
         <section class="panel panel-risk">
           <div class="panel-header">
-            <h2>SafeSend Risk</h2>
+            <h3>SafeSend Risk</h3>
             <span id="safesendScoreBadge" class="risk-badge risk-badge-neutral">
               Score: -- / 100
             </span>
@@ -151,9 +169,7 @@
               <div class="risk-gauge" id="riskGaugeDial">
                 <span id="riskGaugeLabel">--</span>
               </div>
-              <ul class="risk-highlights" id="riskHighlightsList">
-                <!-- JS list items -->
-              </ul>
+              <ul class="risk-highlights" id="riskHighlightsList"></ul>
             </div>
 
             <div class="risk-actions">
@@ -178,12 +194,10 @@
 
           <div class="panel-footer activity-footer">
             <div class="activity-header">
-              <h3>Recent activity</h3>
+              <h4>Recent activity</h4>
               <button id="viewAllActivityBtn" class="link-btn">View all</button>
             </div>
-            <div class="activity-list" id="activityList">
-              <!-- recent tx rows via JS -->
-            </div>
+            <div class="activity-list" id="activityList"></div>
           </div>
         </section>
       </section>
@@ -200,7 +214,7 @@
       </header>
       <div class="modal-body">
         <p class="modal-text">
-          This 12-word phrase is the <strong>only</strong> way to recover this wallet.
+          This 12-word phrase is the only way to recover this wallet.
           Store it somewhere safe. We never store it for you.
         </p>
         <div class="modal-field">
@@ -223,21 +237,22 @@
     </div>
   </div>
 
-  <!-- Import wallet modal -->
+  <!-- Import / unlock wallet modal -->
   <div id="importWalletModal" class="modal" hidden>
     <div class="modal-backdrop" data-close-modal></div>
     <div class="modal-dialog">
       <header class="modal-header">
-        <h2>Import wallet from 12-word seed</h2>
+        <h2>Import / unlock wallet</h2>
         <button class="icon-btn modal-close" data-close-modal>✕</button>
       </header>
       <div class="modal-body">
         <p class="modal-text">
-          Paste your 12-word seed phrase below to import an existing wallet.
-          This never leaves your device.
+          Paste your 12-word seed phrase below. If it matches a wallet already
+          stored on this device, we’ll unlock it. Otherwise we’ll import it as a
+          new wallet.
         </p>
         <div class="modal-field">
-          <label>Wallet label</label>
+          <label>Wallet label (for new wallets)</label>
           <input id="iwLabel" class="input" placeholder="e.g. Ledger wallet" />
         </div>
         <div class="modal-field">
@@ -252,12 +267,10 @@
       </div>
       <footer class="modal-footer">
         <button class="ghost-btn" data-close-modal>Cancel</button>
-        <button id="iwImportBtn" class="primary-btn">Import wallet</button>
+        <button id="iwImportBtn" class="primary-btn">Import / Unlock</button>
       </footer>
     </div>
   </div>
-
-  <!-- Your existing SafeSend modal / other overlays can stay below -->
 
   <script src="js/app.js"></script>
 </body>
