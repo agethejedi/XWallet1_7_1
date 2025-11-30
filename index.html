@@ -18,7 +18,7 @@
         </div>
         <div class="rx-logo-text">
           <span class="rx-brand">Risk<span class="rx-x">X</span>Labs</span>
-          <span class="rx-sub">X-Wallet</span>
+          <span class="rx-sub">X-WALLET</span>
         </div>
       </div>
 
@@ -27,7 +27,6 @@
           <span>Dashboard</span>
         </button>
 
-        <!-- Wallets nav -->
         <button
           class="nav-item"
           id="walletsNavBtn"
@@ -117,7 +116,7 @@
 
       <!-- Dashboard content (shown when unlocked) -->
       <section class="xwallet-content" id="walletDashboard" hidden>
-        <!-- Left: holdings by wallet -->
+        <!-- Holdings / balance only -->
         <section class="panel panel-balance">
           <div class="panel-header">
             <div>
@@ -148,50 +147,77 @@
             </span>
           </div>
         </section>
+      </section>
 
-        <!-- Right: SafeSend / risk (UI only for now) -->
-        <section class="panel panel-risk">
+      <!-- SafeSend dedicated page -->
+      <section class="xwallet-content xwallet-content-single" id="safesendPage" hidden>
+        <section class="panel panel-risk panel-risk-full">
           <div class="panel-header">
-            <h3>SafeSend Risk</h3>
+            <div>
+              <h3>SafeSend</h3>
+              <p class="panel-subtitle">
+                Choose the wallet and asset you’d like to send, screen the recipient,
+                and get an instant risk assessment before you pull the trigger.
+              </p>
+            </div>
             <span id="safesendScoreBadge" class="risk-badge risk-badge-neutral">
               Score: -- / 100
             </span>
           </div>
 
           <div class="panel-body">
-            <div class="risk-summary">
-              <div class="risk-gauge" id="riskGaugeDial">
-                <span id="riskGaugeLabel">--</span>
+            <!-- Wallet / Holding selection row -->
+            <div class="safesend-select-row">
+              <div class="safesend-select-group">
+                <label for="ssWalletSelect">Wallet</label>
+                <select id="ssWalletSelect" class="input safesend-select"></select>
               </div>
-              <ul class="risk-highlights" id="riskHighlightsList"></ul>
+              <div class="safesend-select-group">
+                <label for="ssAssetSelect">Holding</label>
+                <select id="ssAssetSelect" class="input safesend-select"></select>
+              </div>
             </div>
 
-            <div class="risk-actions">
-              <label for="recipientInput">Recipient address</label>
-              <div class="recipient-row">
-                <input
-                  id="recipientInput"
-                  type="text"
-                  class="input"
-                  placeholder="Paste address / ENS / Tron tag"
-                />
-                <button id="runSafeSendBtn" class="primary-btn">
-                  Run SafeSend
-                </button>
+            <!-- Risk meter + recipient entry -->
+            <div class="safesend-main">
+              <div class="risk-summary">
+                <div class="risk-gauge" id="riskGaugeDial">
+                  <span id="riskGaugeLabel">--</span>
+                </div>
+                <ul class="risk-highlights" id="riskHighlightsList"></ul>
               </div>
 
-              <button id="viewFullReportBtn" class="pill-btn pill-btn-outline">
-                View full SafeSend report
-              </button>
+              <div class="risk-actions">
+                <label for="recipientInput">Recipient address</label>
+                <div class="recipient-row">
+                  <input
+                    id="recipientInput"
+                    type="text"
+                    class="input"
+                    placeholder="Paste address / ENS / Tron tag"
+                  />
+                  <button id="runSafeSendBtn" class="primary-btn">
+                    Run SafeSend
+                  </button>
+                </div>
+
+                <button id="viewFullReportBtn" class="pill-btn pill-btn-outline">
+                  View full SafeSend report
+                </button>
+              </div>
             </div>
           </div>
 
-          <div class="panel-footer activity-footer">
-            <div class="activity-header">
-              <h4>Recent activity</h4>
-              <button id="viewAllActivityBtn" class="link-btn">View all</button>
+          <div class="panel-footer safesend-history-footer">
+            <div class="safesend-history-header">
+              <h4>Recent SafeSend checks</h4>
+              <button id="clearSafesendHistoryBtn" class="link-btn">
+                Clear
+              </button>
             </div>
-            <div class="activity-list" id="activityList"></div>
+            <div id="safesendHistoryList" class="safesend-history-list">
+              <!-- populated by JS -->
+            </div>
           </div>
         </section>
       </section>
