@@ -1348,3 +1348,9 @@ body {
 .wallet-balance {
   color: #e5e7eb;
 }
+.xwallet-content[hidden],
+.modal[hidden],
+#walletHero[hidden],
+#walletTopbar[hidden] {
+  display: none !important;
+}
