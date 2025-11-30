@@ -141,44 +141,49 @@ function getWalletById(id) {
 let currentView = "dashboard";
 
 function setView(view) {
-  // Wallets tab is special: always opens the Wallet Hub popup
+  // Wallets nav: always opens Wallet Hub popup instead of switching page
   if (view === "wallets") {
     showWalletHub();
     return;
   }
 
   const hasUnlocked = !!currentWalletId;
+  currentView = view;
 
-  // If no wallet unlocked, force dashboard + hub
-  if (!hasUnlocked && view !== "dashboard") {
-    currentView = "dashboard";
+  // Always hide both content sections first
+  if (walletDashboard) {
     walletDashboard.hidden = true;
+    walletDashboard.classList.remove("active-view");
+  }
+  if (safesendPage) {
     safesendPage.hidden = true;
-    updateAppVisibility(); // will show hub
-    // visually keep Dashboard active
-    navButtons.forEach((btn) => {
-      const v = btn.dataset.view;
-      btn.classList.toggle("nav-item-active", v === "dashboard");
-    });
+    safesendPage.classList.remove("active-view");
+  }
+
+  // If no wallet is unlocked yet, just handle chrome & hub visibility
+  if (!hasUnlocked) {
+    updateAppVisibility();
     return;
   }
 
-  currentView = view;
-
-  if (view === "dashboard") {
-    walletDashboard.hidden = false;
-    safesendPage.hidden = true;
-  } else if (view === "safesend") {
-    walletDashboard.hidden = true;
+  // Show the requested view
+  if (view === "safesend" && safesendPage) {
     safesendPage.hidden = false;
+    safesendPage.classList.add("active-view");
+  } else if (walletDashboard) {
+    // default to dashboard
+    walletDashboard.hidden = false;
+    walletDashboard.classList.add("active-view");
   }
 
+  // Update left nav highlighting (Wallets never shows as active)
   navButtons.forEach((btn) => {
     const v = btn.dataset.view;
-    if (v === "wallets") return; // never mark Wallets as active
+    if (v === "wallets") return;
     btn.classList.toggle("nav-item-active", v === view);
   });
 
+  // Ensure hero/topbar vs hub state is consistent
   updateAppVisibility();
 }
 
@@ -218,25 +223,19 @@ function updateAppVisibility() {
   const hasUnlocked = !!currentWalletId;
 
   if (hasUnlocked) {
-    walletTopbar.hidden = false;
-    walletHero.hidden = false;
-
-    // show current view
-    if (currentView === "safesend") {
-      safesendPage.hidden = false;
-      walletDashboard.hidden = true;
-    } else {
-      walletDashboard.hidden = false;
-      safesendPage.hidden = true;
-    }
+    // Show normal chrome
+    if (walletTopbar) walletTopbar.hidden = false;
+    if (walletHero) walletHero.hidden = false;
 
     hideWalletHub();
     if (walletsNavBtn) walletsNavBtn.classList.remove("nav-item-attention");
   } else {
-    walletTopbar.hidden = true;
-    walletHero.hidden = true;
-    walletDashboard.hidden = true;
-    safesendPage.hidden = true;
+    // Hide main content, show Wallet Hub gate
+    if (walletTopbar) walletTopbar.hidden = true;
+    if (walletHero) walletHero.hidden = true;
+    if (walletDashboard) walletDashboard.hidden = true;
+    if (safesendPage) safesendPage.hidden = true;
+
     showWalletHub();
     if (walletsNavBtn) walletsNavBtn.classList.add("nav-item-attention");
   }
