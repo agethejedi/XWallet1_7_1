@@ -12,7 +12,7 @@ const SS_CURRENT_ID_KEY = "xwallet_current_wallet_id_v1";
 const LS_SAFESEND_HISTORY_KEY = "xwallet_safesend_history_v1";
 
 // ===== RISK ENGINE CONFIG =====
-const RISK_ENGINE_BASE_URL = "https://riskxlabs-vision-api.agedotcom.workers.dev/"; // <-- CHANGE THIS
+const RISK_ENGINE_BASE_URL = "https://riskxlabs-vision-api.agedotcom.workers.dev"; // <-- CHANGE THIS
 
 function mapNetworkForRiskEngine(uiValue) {
   switch (uiValue) {
