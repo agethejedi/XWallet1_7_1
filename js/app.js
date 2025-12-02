@@ -40,7 +40,7 @@ function mapNetworkForRiskEngine(uiValue) {
 }
 
 // Alchemy
-const ALCHEMY_API_KEY = "YOUR_ALCHEMY_KEY_HERE"; // <-- put your real key here
+const ALCHEMY_API_KEY = "kxHg5y9yBXWAb9cOcJsf0"; // <-- put your real key here
 
 function getRpcUrlForNetwork(uiValue) {
   if (!ALCHEMY_API_KEY) return null;
