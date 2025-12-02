@@ -37,7 +37,7 @@
         </button>
 
         <button class="nav-item" data-view="safesend">
-          <span>SafeSend</span>
+          <span>SendSafe</span>
         </button>
         <button class="nav-item" data-view="activity">
           <span>Activity</span>
@@ -105,7 +105,7 @@
             Our
             <span class="safesend-hero-badge">
               <span class="safesend-gauge"></span>
-              <span class="safesend-tv">SafeSend</span>
+              <span class="safesend-tv">SendSafe</span>
             </span>
             technology helps protect everyone from crypto novices to the savviest
             of traders from fraudsters. Get instant assessment and feedback before
@@ -114,7 +114,7 @@
         </div>
       </section>
 
-            <!-- Dashboard content (shown when unlocked) -->
+      <!-- Dashboard content (shown when unlocked) -->
       <section class="xwallet-content" id="walletDashboard" hidden>
         <!-- Holdings / balance only -->
         <section class="panel panel-balance">
@@ -149,12 +149,12 @@
         </section>
       </section>
 
-      <!-- SafeSend dedicated page -->
+      <!-- SendSafe dedicated page -->
       <section class="xwallet-content xwallet-content-single" id="safesendPage" hidden>
         <section class="panel panel-risk panel-risk-full">
           <div class="panel-header">
             <div>
-              <h3>SafeSend</h3>
+              <h3>SendSafe</h3>
               <p class="panel-subtitle">
                 Choose the wallet and asset you’d like to send, screen the recipient,
                 and get an instant risk assessment before you pull the trigger.
@@ -194,30 +194,47 @@
                     id="recipientInput"
                     type="text"
                     class="input"
-                    placeholder="Paste address / ENS / Tron tag"
+                    placeholder="Paste address (0x...)"
                   />
-                  <button id="runSafeSendBtn" class="primary-btn">
-                    Run SafeSend
+                  <button id="runSafeSendBtn" class="primary-btn sendsafe-btn">
+                    <span class="safesend-tv">Sendsafe</span>
                   </button>
                 </div>
 
                 <button id="viewFullReportBtn" class="pill-btn pill-btn-outline">
-                  View full SafeSend report
+                  View full SendSafe report
                 </button>
               </div>
             </div>
           </div>
 
-          <div class="panel-footer safesend-history-footer">
-            <div class="safesend-history-header">
-              <h4>Recent SafeSend checks</h4>
-              <button id="clearSafesendHistoryBtn" class="link-btn">
-                Clear
-              </button>
-            </div>
-            <div id="safesendHistoryList" class="safesend-history-list">
-              <!-- populated by JS -->
-            </div>
+          <!-- Footer: recent transactions + recent SendSafe checks -->
+          <div class="panel-footer safesend-footer">
+            <!-- Recent transactions -->
+            <section class="safesend-recent-tx">
+              <div class="safesend-history-header">
+                <h4>Recent transactions</h4>
+                <span class="hint-text">
+                  Last 10 on-chain transactions for the sender and recipient (where available).
+                </span>
+              </div>
+              <div id="safesendTxList" class="safesend-tx-list">
+                <!-- populated by JS -->
+              </div>
+            </section>
+
+            <!-- Recent SendSafe checks -->
+            <section class="safesend-history-footer">
+              <div class="safesend-history-header">
+                <h4>Recent SendSafe checks</h4>
+                <button id="clearSafesendHistoryBtn" class="link-btn">
+                  Clear
+                </button>
+              </div>
+              <div id="safesendHistoryList" class="safesend-history-list">
+                <!-- populated by JS -->
+              </div>
+            </section>
           </div>
         </section>
       </section>
@@ -236,7 +253,7 @@
         <!-- Hero blurb -->
         <div class="wallet-hub-hero">
           <h3 class="wallet-hub-hero-title">
-            Join the <span class="safesend-tv">SafeSend</span> revolution,
+            Join the <span class="safesend-tv">SendSafe</span> revolution,
             send crypto safely.
           </h3>
         </div>
@@ -379,6 +396,37 @@
       <footer class="modal-footer">
         <button class="ghost-btn" data-close-modal>Cancel</button>
         <button id="uwConfirmBtn" class="primary-btn">Unlock</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- SendSafe result modal -->
+  <div id="safesendResultModal" class="modal" hidden>
+    <div class="modal-backdrop" data-close-modal></div>
+    <div class="modal-dialog safesend-result-dialog">
+      <header class="modal-header">
+        <h2>SendSafe result</h2>
+        <button class="icon-btn modal-close" data-close-modal>✕</button>
+      </header>
+
+      <div class="modal-body">
+        <div class="modal-risk-gauge-wrap">
+          <div class="risk-gauge" id="modalRiskGaugeDial">
+            <span id="modalRiskGaugeLabel">--</span>
+          </div>
+        </div>
+
+        <p id="safesendResultMessage" class="modal-text"></p>
+
+        <!-- shown only for 60–89 scores -->
+        <label id="safesendRiskAckRow" class="modal-checkbox-row" hidden>
+          <input type="checkbox" id="safesendRiskAckCheckbox" />
+          <span id="safesendRiskAckText"></span>
+        </label>
+      </div>
+
+      <footer class="modal-footer" id="safesendResultButtons">
+        <!-- buttons injected by JS -->
       </footer>
     </div>
   </div>
