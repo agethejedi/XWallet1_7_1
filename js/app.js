@@ -136,7 +136,8 @@ const clearSafesendHistoryBtn = document.getElementById(
 const safesendHistoryList = document.getElementById("safesendHistoryList");
 const viewFullReportBtn = document.getElementById("viewFullReportBtn");
 const safesendTxList = document.getElementById("safesendTxList");
-
+const sendAmountInput = document.getElementById("sendAmountInput");
+const sendAmountType = document.getElementById("sendAmountType");
 // SendSafe result modal
 const safesendResultModal = document.getElementById("safesendResultModal");
 const modalRiskGaugeDial = document.getElementById("modalRiskGaugeDial");
@@ -662,20 +663,27 @@ function goToSafeSend(walletId, holdingIndex) {
 
 // ===== SENDSAFE GAUGE / HIGHLIGHTS / HISTORY =====
 function classifyScore(score) {
-  if (score === null || score === undefined || Number.isNaN(score))
+  if (score === null || score === undefined || Number.isNaN(score)) {
     return "neutral";
-  if (score >= 80) return "good";
-  if (score >= 50) return "warn";
-  return "bad";
+  }
+  if (score >= 90) return "critical";       // red
+  if (score >= 60) return "high";           // orange-red
+  if (score >= 25) return "medium";         // light green
+  return "low";                             // dark green
 }
 
 function updateRiskGauge(score) {
-  if (!riskGaugeLabel || !safesendScoreBadge) return;
+  if (!riskGaugeLabel || !safesendScoreBadge || !riskGaugeDial) return;
+
+  // Reset classes
+  safesendScoreBadge.className = "risk-badge";
+  riskGaugeDial.classList.remove("critical", "high", "medium", "low", "neutral");
 
   if (score === null || score === undefined || Number.isNaN(score)) {
     riskGaugeLabel.textContent = "--";
     safesendScoreBadge.textContent = "Score: -- / 100";
-    safesendScoreBadge.className = "risk-badge risk-badge-neutral";
+    safesendScoreBadge.classList.add("risk-badge-neutral");
+    riskGaugeDial.classList.add("neutral");
     return;
   }
 
@@ -683,13 +691,14 @@ function updateRiskGauge(score) {
   safesendScoreBadge.textContent = `Score: ${score} / 100`;
 
   const level = classifyScore(score);
-  safesendScoreBadge.className = "risk-badge";
-  if (level === "good") safesendScoreBadge.classList.add("risk-badge-good");
-  else if (level === "warn")
-    safesendScoreBadge.classList.add("risk-badge-warn");
-  else if (level === "bad")
-    safesendScoreBadge.classList.add("risk-badge-bad");
-  else safesendScoreBadge.classList.add("risk-badge-neutral");
+  safesendScoreBadge.classList.add(`risk-badge-${level}`);
+  riskGaugeDial.classList.add(level);
+
+  // Trigger a short pulse animation on update
+  riskGaugeDial.classList.add("risk-gauge-anim");
+  setTimeout(() => {
+    riskGaugeDial.classList.remove("risk-gauge-anim");
+  }, 600);
 }
 
 function updateRiskHighlightsFromEngine(engineResult) {
@@ -763,25 +772,13 @@ function renderSafesendHistory() {
         </div>
       `;
 
-      const right = document.createElement("div");
-      const scoreClass =
-        entry.scoreCategory === "good"
-          ? "good"
-          : entry.scoreCategory === "warn"
-          ? "warn"
-          : entry.scoreCategory === "bad"
-          ? "bad"
-          : "";
-      right.innerHTML = `
-        <div class="safesend-history-score ${scoreClass}">
-          ${entry.score}/100
-        </div>
-        ${
-          entry.alertText
-            ? `<div class="safesend-history-alert">${entry.alertText}</div>`
-            : ""
-        }
-      `;
+      const scoreClass = entry.scoreCategory || "neutral";
+right.innerHTML = `
+  <div class="safesend-history-score ${scoreClass}">
+    ${entry.score}/100
+  </div>
+  ${entry.alertText ? `<div class="safesend-history-alert">${entry.alertText}</div>` : ""}
+`;
 
       row.appendChild(main);
       row.appendChild(right);
@@ -825,36 +822,46 @@ async function loadRecentTransactions(fromAddress, toAddress, uiNetwork) {
       fetchRecentTxForAddress(fromAddress, uiNetwork),
     ]);
 
-    const frag = document.createDocumentFragment();
+    const wrapper = document.createElement("div");
+    wrapper.className = "safesend-tx-columns";
+
+    // Recipient column
+    const recipCol = document.createElement("div");
+    recipCol.className = "safesend-tx-column";
+    const recipHeader = document.createElement("div");
+    recipHeader.className = "safesend-tx-section-label";
+    recipHeader.textContent = "Recipient address";
+    recipCol.appendChild(recipHeader);
 
     if (toTxs.length) {
-      const label = document.createElement("div");
-      label.className = "safesend-tx-section-label";
-      label.textContent = "Recipient address";
-      frag.appendChild(label);
-
       toTxs.forEach((tx) => {
         const row = document.createElement("div");
         row.className = "safesend-tx-row";
         row.innerHTML = `
-          <span class="safesend-tx-time">${formatTxTime(
-            tx.timeStamp
-          )}</span>
+          <span class="safesend-tx-time">${formatTxTime(tx.timeStamp)}</span>
           <span class="safesend-tx-hash">${shorten(tx.hash || "")}</span>
           <span class="safesend-tx-amount">${
             tx.value && tx.value !== "0" ? tx.value : ""
           }</span>
         `;
-        frag.appendChild(row);
+        recipCol.appendChild(row);
       });
+    } else {
+      const empty = document.createElement("div");
+      empty.className = "hint-text";
+      empty.textContent = "No recent tx for recipient.";
+      recipCol.appendChild(empty);
     }
 
-    if (fromTxs.length) {
-      const label = document.createElement("div");
-      label.className = "safesend-tx-section-label";
-      label.textContent = "Sender address";
-      frag.appendChild(label);
+    // Sender column
+    const senderCol = document.createElement("div");
+    senderCol.className = "safesend-tx-column";
+    const senderHeader = document.createElement("div");
+    senderHeader.className = "safesend-tx-section-label";
+    senderHeader.textContent = "Sender address";
+    senderCol.appendChild(senderHeader);
 
+    if (fromTxs.length) {
       fromTxs.forEach((tx) => {
         const direction =
           tx.from &&
@@ -862,6 +869,7 @@ async function loadRecentTransactions(fromAddress, toAddress, uiNetwork) {
           tx.from.toLowerCase() === fromAddress.toLowerCase()
             ? "Sent"
             : "Received";
+
         const row = document.createElement("div");
         row.className = "safesend-tx-row";
         row.innerHTML = `
@@ -874,10 +882,26 @@ async function loadRecentTransactions(fromAddress, toAddress, uiNetwork) {
             tx.value && tx.value !== "0" ? tx.value : ""
           }</span>
         `;
-        frag.appendChild(row);
+        senderCol.appendChild(row);
       });
+    } else {
+      const empty = document.createElement("div");
+      empty.className = "hint-text";
+      empty.textContent = "No recent tx for sender.";
+      senderCol.appendChild(empty);
     }
 
+    wrapper.appendChild(recipCol);
+    wrapper.appendChild(senderCol);
+
+    safesendTxList.innerHTML = "";
+    safesendTxList.appendChild(wrapper);
+  } catch (err) {
+    console.warn("loadRecentTransactions error", err);
+    safesendTxList.innerHTML =
+      '<div class="hint-text">Unable to load recent transactions right now.</div>';
+  }
+}
     safesendTxList.innerHTML = "";
     if (!toTxs.length && !fromTxs.length) {
       const empty = document.createElement("div");
@@ -915,21 +939,29 @@ document.addEventListener("click", (e) => {
 function updateModalGauge(score) {
   if (!modalRiskGaugeDial || !modalRiskGaugeLabel) return;
 
-  modalRiskGaugeDial.classList.remove("good", "warn", "bad");
-  if (
-    score === null ||
-    score === undefined ||
-    Number.isNaN(score)
-  ) {
+  modalRiskGaugeDial.classList.remove(
+    "critical",
+    "high",
+    "medium",
+    "low",
+    "neutral"
+  );
+
+  if (score === null || score === undefined || Number.isNaN(score)) {
     modalRiskGaugeLabel.textContent = "--";
+    modalRiskGaugeDial.classList.add("neutral");
     return;
   }
 
   modalRiskGaugeLabel.textContent = score.toString();
   const level = classifyScore(score);
-  if (level === "good") modalRiskGaugeDial.classList.add("good");
-  else if (level === "warn") modalRiskGaugeDial.classList.add("warn");
-  else if (level === "bad") modalRiskGaugeDial.classList.add("bad");
+  modalRiskGaugeDial.classList.add(level);
+
+  // Pulse animation
+  modalRiskGaugeDial.classList.add("risk-gauge-anim");
+  setTimeout(() => {
+    modalRiskGaugeDial.classList.remove("risk-gauge-anim");
+  }, 600);
 }
 
 function showSafesendResultModal(score) {
@@ -1036,21 +1068,50 @@ if (runSafeSendBtn) {
       return;
     }
 
-    const walletId = ssWalletSelect ? ssWalletSelect.value : null;
-    const assetKey = ssAssetSelect ? ssAssetSelect.value : null;
-    const wallet = walletId && getWalletById(walletId);
+   const walletId = ssWalletSelect ? ssWalletSelect.value : null;
+const assetKey = ssAssetSelect ? ssAssetSelect.value : null;
+const wallet = walletId && getWalletById(walletId);
 
-    let assetSymbol = "";
-    let amountUsd = null;
+let assetSymbol = "";
+let holdingUsdValue = null;
+let holdingAmount = null;
+let amountUsd = null;
 
-    if (wallet && assetKey && assetKey.includes(":")) {
-      const idx = Number(assetKey.split(":")[1]);
-      const holding = wallet.holdings[idx];
-      if (holding) {
-        assetSymbol = holding.symbol;
-        amountUsd = holding.usdValue ?? null;
+if (wallet && assetKey && assetKey.includes(":")) {
+  const idx = Number(assetKey.split(":")[1]);
+  const holding = wallet.holdings[idx];
+  if (holding) {
+    assetSymbol = holding.symbol;
+    holdingUsdValue = holding.usdValue ?? null;
+    holdingAmount = holding.amount ?? null;
+  }
+}
+
+// New: honor user-entered amount
+const rawAmt = sendAmountInput ? sendAmountInput.value.trim() : "";
+const amtType = sendAmountType ? sendAmountType.value : "asset";
+
+if (rawAmt) {
+  const parsed = parseFloat(rawAmt);
+  if (!Number.isNaN(parsed) && parsed > 0) {
+    if (amtType === "usd") {
+      amountUsd = parsed;
+    } else {
+      // coins → approximate USD using current holding price if known
+      if (holdingUsdValue != null && holdingAmount && holdingAmount > 0) {
+        const unitPrice = holdingUsdValue / holdingAmount;
+        amountUsd = parsed * unitPrice;
+      } else {
+        amountUsd = null; // fallback: engine will treat as unknown
       }
     }
+  }
+}
+
+// If user left amount blank, default to full holding value if available
+if (amountUsd === null && holdingUsdValue != null) {
+  amountUsd = holdingUsdValue;
+}
 
     runSafeSendBtn.disabled = true;
     const labelSpan = runSafeSendBtn.querySelector(".safesend-tv");
