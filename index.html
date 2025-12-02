@@ -188,23 +188,45 @@
               </div>
 
               <div class="risk-actions">
-                <label for="recipientInput">Recipient address</label>
-                <div class="recipient-row">
-                  <input
-                    id="recipientInput"
-                    type="text"
-                    class="input"
-                    placeholder="Paste address (0x...)"
-                  />
-                  <button id="runSafeSendBtn" class="primary-btn sendsafe-btn">
-                    <span class="safesend-tv">Sendsafe</span>
-                  </button>
-                </div>
+  <label for="recipientInput">Recipient address</label>
+  <div class="recipient-row">
+    <input
+      id="recipientInput"
+      type="text"
+      class="input"
+      placeholder="Paste address (0x...)"
+    />
+    <button id="runSafeSendBtn" class="primary-btn sendsafe-btn">
+      <span class="safesend-tv">Sendsafe</span>
+    </button>
+  </div>
 
-                <button id="viewFullReportBtn" class="pill-btn pill-btn-outline">
-                  View full SendSafe report
-                </button>
-              </div>
+  <!-- New: amount + denomination -->
+  <div class="amount-row">
+    <div class="amount-group">
+      <label for="sendAmountInput">Amount to send</label>
+      <input
+        id="sendAmountInput"
+        type="number"
+        step="any"
+        min="0"
+        class="input"
+        placeholder="e.g. 0.05"
+      />
+    </div>
+    <div class="amount-group amount-type">
+      <label for="sendAmountType">Denomination</label>
+      <select id="sendAmountType" class="input">
+        <option value="asset">In coins</option>
+        <option value="usd">In USD</option>
+      </select>
+    </div>
+  </div>
+
+  <button id="viewFullReportBtn" class="pill-btn pill-btn-outline">
+    View full SendSafe report
+  </button>
+</div>
             </div>
           </div>
 
