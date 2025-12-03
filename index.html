@@ -177,37 +177,39 @@
                 <select id="ssAssetSelect" class="input safesend-select"></select>
               </div>
             </div>
-<!-- Selected holding balance -->
-<div class="safesend-balance-row">
-  <div class="safesend-balance-label">Selected balance</div>
-  <div class="safesend-balance-values">
-    <span id="ssBalanceAmount">--</span>
-    <span class="safesend-balance-sep">&middot;</span>
-    <span id="ssBalanceUsd">--</span>
-  </div>
-</div>
 
-<!-- Amount to send -->
-<div class="safesend-amount-row">
-  <div class="amount-group">
-    <label for="ssSendAmount">Amount to send</label>
-    <input
-      id="ssSendAmount"
-      type="number"
-      step="any"
-      min="0"
-      class="input"
-      placeholder="e.g. 0.05"
-    />
-  </div>
-  <div class="amount-group amount-type">
-    <label for="ssAmountUnit">Denomination</label>
-    <select id="ssAmountUnit" class="input">
-      <option value="asset">In coins / tokens</option>
-      <option value="usd">In USD</option>
-    </select>
-  </div>
-</div>
+            <!-- Selected holding balance -->
+            <div class="safesend-balance-row">
+              <div class="safesend-balance-label">Selected balance</div>
+              <div class="safesend-balance-values">
+                <span id="ssBalanceAmount">--</span>
+                <span class="safesend-balance-sep">&middot;</span>
+                <span id="ssBalanceUsd">--</span>
+              </div>
+            </div>
+
+            <!-- Amount to send -->
+            <div class="safesend-amount-row">
+              <div class="amount-group">
+                <label for="ssSendAmount">Amount to send</label>
+                <input
+                  id="ssSendAmount"
+                  type="number"
+                  step="any"
+                  min="0"
+                  class="input"
+                  placeholder="e.g. 0.05"
+                />
+              </div>
+              <div class="amount-group amount-type">
+                <label for="ssAmountUnit">Denomination</label>
+                <select id="ssAmountUnit" class="input">
+                  <option value="asset">In coins / tokens</option>
+                  <option value="usd">In USD</option>
+                </select>
+              </div>
+            </div>
+
             <!-- Risk meter + recipient entry -->
             <div class="safesend-main">
               <div class="risk-summary">
@@ -265,6 +267,23 @@
                 <!-- populated by JS -->
               </div>
             </section>
+          </div>
+        </section>
+      </section>
+
+      <!-- Settings page -->
+      <section class="xwallet-content xwallet-content-single" id="settingsPage" hidden>
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <h3>Settings</h3>
+              <p class="panel-subtitle">
+                Rename your wallets to keep things organized. Labels will update across Dashboard and SendSafe.
+              </p>
+            </div>
+          </div>
+          <div class="panel-body">
+            <div id="settingsWalletList" class="settings-wallet-list"></div>
           </div>
         </section>
       </section>
