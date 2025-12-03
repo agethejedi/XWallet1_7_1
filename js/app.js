@@ -73,6 +73,7 @@ const walletTopbar = document.getElementById("walletTopbar");
 const walletHero = document.getElementById("walletHero");
 const walletDashboard = document.getElementById("walletDashboard");
 const safesendPage = document.getElementById("safesendPage");
+const settingsPage = document.getElementById("settingsPage");
 
 const walletAddressEl = document.getElementById("walletAddress");
 const fiatBalanceLabelEl = document.getElementById("fiatBalanceLabel");
@@ -144,6 +145,9 @@ const ssBalanceAmount = document.getElementById("ssBalanceAmount");
 const ssBalanceUsd = document.getElementById("ssBalanceUsd");
 const ssSendAmount = document.getElementById("ssSendAmount");
 const ssAmountUnit = document.getElementById("ssAmountUnit");
+
+// Settings
+const settingsWalletList = document.getElementById("settingsWalletList");
 
 // SendSafe result modal
 const safesendResultModal = document.getElementById("safesendResultModal");
@@ -325,6 +329,7 @@ function updateAppVisibility() {
     if (walletHero) walletHero.hidden = true;
     if (walletDashboard) walletDashboard.hidden = true;
     if (safesendPage) safesendPage.hidden = true;
+    if (settingsPage) settingsPage.hidden = true;
 
     showWalletHub();
     if (walletsNavBtn) walletsNavBtn.classList.add("nav-item-attention");
@@ -382,6 +387,10 @@ function setView(view) {
     safesendPage.hidden = true;
     safesendPage.classList.remove("active-view");
   }
+  if (settingsPage) {
+    settingsPage.hidden = true;
+    settingsPage.classList.remove("active-view");
+  }
 
   // stop any SafeSend-specific timers when leaving
   if (view !== "safesend") {
@@ -397,6 +406,10 @@ function setView(view) {
     safesendPage.hidden = false;
     safesendPage.classList.add("active-view");
     startSafesendBalanceRefresh();
+  } else if (view === "settings" && settingsPage) {
+    settingsPage.hidden = false;
+    settingsPage.classList.add("active-view");
+    renderSettingsWallets();
   } else if (walletDashboard) {
     walletDashboard.hidden = false;
     walletDashboard.classList.add("active-view");
@@ -758,6 +771,69 @@ function goToSafeSend(walletId, holdingIndex) {
 
   if (recipientInput) recipientInput.focus();
 }
+
+// ===== SETTINGS: WALLET LABELS =====
+function renderSettingsWallets() {
+  if (!settingsWalletList) return;
+
+  settingsWalletList.innerHTML = "";
+
+  if (!wallets.length) {
+    settingsWalletList.innerHTML =
+      '<p class="hint-text">No wallets yet. Create or import a wallet first.</p>';
+    return;
+  }
+
+  wallets.forEach((w) => {
+    const row = document.createElement("div");
+    row.className = "settings-wallet-row";
+    row.dataset.walletId = w.id;
+    row.innerHTML = `
+      <div class="settings-wallet-main">
+        <label>Label</label>
+        <input class="input settings-wallet-label" type="text" value="${w.label}">
+      </div>
+      <div class="settings-wallet-address">${w.address}</div>
+      <button class="pill-btn-outline settings-wallet-save" type="button">
+        Save
+      </button>
+    `;
+    settingsWalletList.appendChild(row);
+  });
+}
+
+// Handle Save clicks in Settings
+document.addEventListener("click", (e) => {
+  const saveBtn = e.target.closest(".settings-wallet-save");
+  if (!saveBtn) return;
+
+  const row = saveBtn.closest(".settings-wallet-row");
+  if (!row) return;
+
+  const walletId = row.dataset.walletId;
+  const input = row.querySelector(".settings-wallet-label");
+  if (!walletId || !input) return;
+
+  const newLabel = input.value.trim() || "Untitled wallet";
+  const wallet = getWalletById(walletId);
+  if (!wallet) return;
+
+  wallet.label = newLabel;
+  saveWallets();
+  renderWallets();
+  renderSettingsWallets();
+
+  if (currentWalletId === walletId) {
+    refreshHeader();
+  }
+
+  // tiny visual feedback
+  const originalText = saveBtn.textContent;
+  saveBtn.textContent = "Saved";
+  setTimeout(() => {
+    saveBtn.textContent = originalText;
+  }, 700);
+});
 
 // ===== SENDSAFE GAUGE / HIGHLIGHTS / HISTORY =====
 function classifyScore(score) {
