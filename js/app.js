@@ -1,4 +1,4 @@
-// app.js — X-Wallet + SendSafe page + Alchemy Sepolia + shared Risk Engine
+// app.js — X-Wallet + SendSafe page + Alchemy Sepolia + shared Risk Engine + Ticker
 
 if (typeof ethers === "undefined") {
   alert("Crypto library failed to load. Check the ethers.js <script> tag URL.");
@@ -9,6 +9,7 @@ if (typeof ethers === "undefined") {
 const LS_WALLETS_KEY = "xwallet_wallets_v1";
 const SS_CURRENT_ID_KEY = "xwallet_current_wallet_id_v1";
 const LS_SAFESEND_HISTORY_KEY = "xwallet_safesend_history_v1";
+const LS_TICKER_ASSETS_KEY = "xwallet_ticker_assets_v1";
 
 // Risk engine (shared with Vision)
 const RISK_ENGINE_BASE_URL =
@@ -39,6 +40,21 @@ function mapNetworkForRiskEngine(uiValue) {
   }
 }
 
+// ===== TICKER / WATCHLIST CONFIG =====
+// Available assets for ticker selection, mapped to CoinGecko IDs.
+const AVAILABLE_TICKER_ASSETS = [
+  { symbol: "BTC", id: "bitcoin", label: "Bitcoin" },
+  { symbol: "ETH", id: "ethereum", label: "Ethereum" },
+  { symbol: "USDT", id: "tether", label: "Tether (USDT)" },
+  { symbol: "USDC", id: "usd-coin", label: "USD Coin (USDC)" },
+  { symbol: "SOL", id: "solana", label: "Solana" },
+  { symbol: "ARB", id: "arbitrum", label: "Arbitrum" },
+  { symbol: "MATIC", id: "matic-network", label: "Polygon (MATIC)" },
+  { symbol: "LINK", id: "chainlink", label: "Chainlink" },
+];
+
+const DEFAULT_TICKER_SYMBOLS = ["BTC", "ETH", "USDT", "SOL"];
+
 // Alchemy
 const ALCHEMY_API_KEY = "kxHg5y9yBXWAb9cOcJsf0"; // <-- put your real key here
 
@@ -65,8 +81,8 @@ let wallets = [];
 let currentWalletId = null;
 let pendingUnlockWalletId = null;
 let safesendHistory = [];
-let currentView = "dashboard";
-let safesendBalanceInterval = null;
+let tickerSymbols = []; // array of SYMBOL strings, e.g. ["BTC","ETH"]
+let tickerRefreshTimer = null;
 
 // ===== DOM =====
 const walletTopbar = document.getElementById("walletTopbar");
@@ -140,14 +156,11 @@ const safesendHistoryList = document.getElementById("safesendHistoryList");
 const viewFullReportBtn = document.getElementById("viewFullReportBtn");
 const safesendTxList = document.getElementById("safesendTxList");
 
-// New SafeSend balance + amount fields
-const ssBalanceAmount = document.getElementById("ssBalanceAmount");
-const ssBalanceUsd = document.getElementById("ssBalanceUsd");
-const ssSendAmount = document.getElementById("ssSendAmount");
-const ssAmountUnit = document.getElementById("ssAmountUnit");
-
-// Settings
-const settingsWalletList = document.getElementById("settingsWalletList");
+// SendSafe balance / amount selectors
+const ssBalanceAmountEl = document.getElementById("ssBalanceAmount");
+const ssBalanceUsdEl = document.getElementById("ssBalanceUsd");
+const ssSendAmountEl = document.getElementById("ssSendAmount");
+const ssAmountUnitEl = document.getElementById("ssAmountUnit");
 
 // SendSafe result modal
 const safesendResultModal = document.getElementById("safesendResultModal");
@@ -160,6 +173,12 @@ const safesendRiskAckCheckbox = document.getElementById(
 );
 const safesendRiskAckText = document.getElementById("safesendRiskAckText");
 const safesendResultButtons = document.getElementById("safesendResultButtons");
+
+// Ticker / settings
+const tickerStrip = document.getElementById("tickerStrip");
+const tickerSettingsContainer = document.getElementById(
+  "tickerSettingsContainer"
+);
 
 // ===== UTIL =====
 function formatPct(p) {
@@ -239,6 +258,25 @@ function getWalletById(id) {
   return wallets.find((w) => w.id === id);
 }
 
+// Ticker assets load/save
+function loadTickerSymbols() {
+  try {
+    const raw = localStorage.getItem(LS_TICKER_ASSETS_KEY);
+    const arr = raw ? JSON.parse(raw) : null;
+    if (Array.isArray(arr) && arr.length) {
+      return arr.filter((s) => typeof s === "string");
+    }
+  } catch {
+    // ignore
+  }
+  return DEFAULT_TICKER_SYMBOLS.slice();
+}
+
+function saveTickerSymbols(symbols) {
+  tickerSymbols = symbols.slice();
+  localStorage.setItem(LS_TICKER_ASSETS_KEY, JSON.stringify(tickerSymbols));
+}
+
 // ===== LIVE BALANCES (Alchemy) =====
 async function refreshWalletOnChainData() {
   const wallet = getWalletById(currentWalletId);
@@ -289,7 +327,6 @@ async function refreshWalletOnChainData() {
 
     saveWallets();
     renderWallets();
-    updateSafesendBalanceDisplay();
 
     if (networkStatusPill) {
       networkStatusPill.textContent = "RPC: CONNECTED";
@@ -305,6 +342,8 @@ async function refreshWalletOnChainData() {
 }
 
 // ===== VIEW MANAGEMENT =====
+let currentView = "dashboard";
+
 function refreshHeader() {
   const wallet = getWalletById(currentWalletId);
   if (!wallet) {
@@ -336,24 +375,6 @@ function updateAppVisibility() {
   }
 }
 
-function startSafesendBalanceRefresh() {
-  if (!currentWalletId) return;
-  updateSafesendBalanceDisplay();
-  refreshWalletOnChainData();
-  if (safesendBalanceInterval) return;
-  safesendBalanceInterval = setInterval(() => {
-    refreshWalletOnChainData();
-    updateSafesendBalanceDisplay();
-  }, 60_000); // 1 minute
-}
-
-function stopSafesendBalanceRefresh() {
-  if (safesendBalanceInterval) {
-    clearInterval(safesendBalanceInterval);
-    safesendBalanceInterval = null;
-  }
-}
-
 function setCurrentWallet(id, { refreshOnChain = false } = {}) {
   currentWalletId = id;
   if (id) {
@@ -364,7 +385,6 @@ function setCurrentWallet(id, { refreshOnChain = false } = {}) {
   refreshHeader();
   updateAppVisibility();
   populateSafesendSelectors();
-  updateSafesendBalanceDisplay();
   if (refreshOnChain) {
     refreshWalletOnChainData();
   }
@@ -379,6 +399,7 @@ function setView(view) {
   const hasUnlocked = !!currentWalletId;
   currentView = view;
 
+  // Hide all main views first
   if (walletDashboard) {
     walletDashboard.hidden = true;
     walletDashboard.classList.remove("active-view");
@@ -392,29 +413,24 @@ function setView(view) {
     settingsPage.classList.remove("active-view");
   }
 
-  // stop any SafeSend-specific timers when leaving
-  if (view !== "safesend") {
-    stopSafesendBalanceRefresh();
-  }
-
   if (!hasUnlocked) {
     updateAppVisibility();
     return;
   }
 
+  // Show the selected view
   if (view === "safesend" && safesendPage) {
     safesendPage.hidden = false;
     safesendPage.classList.add("active-view");
-    startSafesendBalanceRefresh();
   } else if (view === "settings" && settingsPage) {
     settingsPage.hidden = false;
     settingsPage.classList.add("active-view");
-    renderSettingsWallets();
   } else if (walletDashboard) {
     walletDashboard.hidden = false;
     walletDashboard.classList.add("active-view");
   }
 
+  // Update nav button highlighting
   navButtons.forEach((btn) => {
     const v = btn.dataset.view;
     if (v === "wallets") return;
@@ -563,7 +579,6 @@ function renderWallets() {
   fiatBalanceLabelEl.textContent = formatUsd(total);
   refreshHeader();
   populateSafesendSelectors();
-  updateSafesendBalanceDisplay();
 }
 
 // Accordion open/close (no re-render here)
@@ -629,7 +644,7 @@ document.addEventListener("click", (e) => {
   }
 });
 
-// ===== SENDSAFE SELECTORS & BALANCE =====
+// ===== SENDSAFE SELECTORS & BALANCE DISPLAY =====
 function populateSafesendSelectors() {
   if (!ssWalletSelect || !ssAssetSelect) return;
 
@@ -642,6 +657,7 @@ function populateSafesendSelectors() {
   if (!wallets.length) {
     ssWalletSelect.innerHTML = `<option value="">No wallets yet</option>`;
     ssAssetSelect.innerHTML = `<option value="">No holdings</option>`;
+    updateSafesendSelectedBalance(null, null);
     return;
   }
 
@@ -668,7 +684,7 @@ function populateAssetsForWallet(walletId, prevAssetKey) {
   const wallet = getWalletById(walletId);
   if (!wallet || !wallet.holdings.length) {
     ssAssetSelect.innerHTML = `<option value="">No holdings</option>`;
-    updateSafesendBalanceDisplay();
+    updateSafesendSelectedBalance(null, null);
     return;
   }
 
@@ -680,78 +696,62 @@ function populateAssetsForWallet(walletId, prevAssetKey) {
     ssAssetSelect.appendChild(opt);
   });
 
-  if (
-    prevAssetKey &&
-    [...ssAssetSelect.options].some((o) => o.value === prevAssetKey)
-  ) {
-    ssAssetSelect.value = prevAssetKey;
+  let selectedKey = null;
+  if (prevAssetKey && [...ssAssetSelect.options].some((o) => o.value === prevAssetKey)) {
+    selectedKey = prevAssetKey;
   } else {
-    ssAssetSelect.value = `${wallet.id}:0`;
+    selectedKey = `${wallet.id}:0`;
   }
-
-  updateSafesendBalanceDisplay();
+  ssAssetSelect.value = selectedKey;
+  updateSafesendBalanceForSelection();
 }
 
-// helper: currently selected holding
-function getSelectedSafesendHolding() {
-  if (!ssWalletSelect || !ssAssetSelect) return null;
+function updateSafesendSelectedBalance(wallet, holding) {
+  if (!ssBalanceAmountEl || !ssBalanceUsdEl) return;
 
-  const walletId = ssWalletSelect.value || null;
-  const assetKey = ssAssetSelect.value || null;
-  if (!walletId || !assetKey || !assetKey.includes(":")) return null;
-
-  const wallet = getWalletById(walletId);
-  if (!wallet || !Array.isArray(wallet.holdings)) return null;
-
-  const idx = Number(assetKey.split(":")[1]);
-  const holding = wallet.holdings[idx];
-  if (!holding) return null;
-
-  return { wallet, holding };
-}
-
-function updateSafesendBalanceDisplay() {
-  if (!ssBalanceAmount || !ssBalanceUsd) return;
-
-  const data = getSelectedSafesendHolding();
-  if (!data) {
-    ssBalanceAmount.textContent = "--";
-    ssBalanceUsd.textContent = "--";
+  if (!wallet || !holding) {
+    ssBalanceAmountEl.textContent = "--";
+    ssBalanceUsdEl.textContent = "--";
     return;
   }
 
-  const { holding } = data;
-  const symbol = holding.symbol || holding.asset || "";
-  const amount = holding.amount != null ? holding.amount : null;
-  const usd = holding.usdValue != null ? holding.usdValue : null;
+  ssBalanceAmountEl.textContent = `${holding.amount} ${holding.symbol}`;
+  ssBalanceUsdEl.textContent = formatUsd(holding.usdValue || 0);
+}
 
-  ssBalanceAmount.textContent =
-    amount != null
-      ? `${amount} ${symbol}`
-      : symbol
-      ? `${symbol} (amount unknown)`
-      : "--";
+function updateSafesendBalanceForSelection() {
+  const walletId = ssWalletSelect ? ssWalletSelect.value : null;
+  const assetKey = ssAssetSelect ? ssAssetSelect.value : null;
+  if (!walletId || !assetKey || !assetKey.includes(":")) {
+    updateSafesendSelectedBalance(null, null);
+    return;
+  }
 
-  ssBalanceUsd.textContent =
-    usd != null
-      ? `$${usd.toLocaleString(undefined, { maximumFractionDigits: 2 })}`
-      : "--";
+  const wallet = getWalletById(walletId);
+  if (!wallet) {
+    updateSafesendSelectedBalance(null, null);
+    return;
+  }
+
+  const idx = Number(assetKey.split(":")[1]);
+  const holding = wallet.holdings && wallet.holdings[idx];
+  if (!holding) {
+    updateSafesendSelectedBalance(null, null);
+    return;
+  }
+
+  updateSafesendSelectedBalance(wallet, holding);
 }
 
 if (ssWalletSelect) {
   ssWalletSelect.addEventListener("change", (e) => {
-    const walletId = e.target.value;
-    populateAssetsForWallet(walletId, null);
-    // make selected wallet the current wallet so on-chain refresh hits it
-    if (walletId) {
-      setCurrentWallet(walletId, { refreshOnChain: true });
-    }
+    populateAssetsForWallet(e.target.value, null);
   });
 }
 
 if (ssAssetSelect) {
   ssAssetSelect.addEventListener("change", () => {
-    updateSafesendBalanceDisplay();
+    updateSafesendBalanceForSelection();
   });
 }
 
@@ -765,75 +765,8 @@ function goToSafeSend(walletId, holdingIndex) {
     populateAssetsForWallet(walletId, key);
   }
 
-  if (walletId) {
-    setCurrentWallet(walletId, { refreshOnChain: true });
-  }
-
   if (recipientInput) recipientInput.focus();
 }
-
-// ===== SETTINGS: WALLET LABELS =====
-function renderSettingsWallets() {
-  if (!settingsWalletList) return;
-
-  settingsWalletList.innerHTML = "";
-
-  if (!wallets.length) {
-    settingsWalletList.innerHTML =
-      '<p class="hint-text">No wallets yet. Create or import a wallet first.</p>';
-    return;
-  }
-
-  wallets.forEach((w) => {
-    const row = document.createElement("div");
-    row.className = "settings-wallet-row";
-    row.dataset.walletId = w.id;
-    row.innerHTML = `
-      <div class="settings-wallet-main">
-        <label>Label</label>
-        <input class="input settings-wallet-label" type="text" value="${w.label}">
-      </div>
-      <div class="settings-wallet-address">${w.address}</div>
-      <button class="pill-btn-outline settings-wallet-save" type="button">
-        Save
-      </button>
-    `;
-    settingsWalletList.appendChild(row);
-  });
-}
-
-// Handle Save clicks in Settings
-document.addEventListener("click", (e) => {
-  const saveBtn = e.target.closest(".settings-wallet-save");
-  if (!saveBtn) return;
-
-  const row = saveBtn.closest(".settings-wallet-row");
-  if (!row) return;
-
-  const walletId = row.dataset.walletId;
-  const input = row.querySelector(".settings-wallet-label");
-  if (!walletId || !input) return;
-
-  const newLabel = input.value.trim() || "Untitled wallet";
-  const wallet = getWalletById(walletId);
-  if (!wallet) return;
-
-  wallet.label = newLabel;
-  saveWallets();
-  renderWallets();
-  renderSettingsWallets();
-
-  if (currentWalletId === walletId) {
-    refreshHeader();
-  }
-
-  // tiny visual feedback
-  const originalText = saveBtn.textContent;
-  saveBtn.textContent = "Saved";
-  setTimeout(() => {
-    saveBtn.textContent = originalText;
-  }, 700);
-});
 
 // ===== SENDSAFE GAUGE / HIGHLIGHTS / HISTORY =====
 function classifyScore(score) {
@@ -1033,7 +966,7 @@ async function loadRecentTransactions(fromAddress, toAddress, uiNetwork) {
       recipCol.appendChild(empty);
     }
 
-    // Sender column (with direction)
+    // Sender column
     const senderCol = document.createElement("div");
     senderCol.className = "safesend-tx-column";
 
@@ -1224,38 +1157,13 @@ if (runSafeSendBtn) {
 
     let assetSymbol = "";
     let amountUsd = null;
-    let unitPriceUsd = null;
 
     if (wallet && assetKey && assetKey.includes(":")) {
       const idx = Number(assetKey.split(":")[1]);
       const holding = wallet.holdings[idx];
       if (holding) {
         assetSymbol = holding.symbol;
-        // derive unit price if possible
-        if (
-          holding.amount != null &&
-          holding.usdValue != null &&
-          holding.amount !== 0
-        ) {
-          unitPriceUsd = holding.usdValue / holding.amount;
-        }
-        amountUsd = holding.usdValue ?? null; // default if user doesn't enter amount
-      }
-    }
-
-    // Read user-entered amount (optional)
-    if (ssSendAmount && ssAmountUnit) {
-      const rawVal = ssSendAmount.value.trim();
-      const denom = ssAmountUnit.value || "asset";
-      if (rawVal) {
-        const numeric = Number(rawVal);
-        if (!Number.isNaN(numeric) && numeric >= 0) {
-          if (denom === "usd") {
-            amountUsd = numeric;
-          } else if (denom === "asset" && unitPriceUsd != null) {
-            amountUsd = numeric * unitPriceUsd;
-          }
-        }
+        amountUsd = holding.usdValue ?? null;
       }
     }
 
@@ -1309,8 +1217,7 @@ if (runSafeSendBtn) {
         return;
       }
 
-      const score =
-        engineResult.score ?? engineResult.risk_score ?? null;
+      const score = engineResult.score ?? engineResult.risk_score ?? null;
 
       updateRiskGauge(score);
       updateRiskHighlightsFromEngine(engineResult);
@@ -1650,9 +1557,150 @@ if (sendBtn) {
   });
 }
 
+// ===== TICKER: SETTINGS UI =====
+function renderTickerSettingsUI() {
+  if (!tickerSettingsContainer) return;
+
+  tickerSettingsContainer.innerHTML = "";
+
+  const currentSet = new Set(tickerSymbols);
+
+  AVAILABLE_TICKER_ASSETS.forEach((asset) => {
+    const row = document.createElement("label");
+    row.className = "ticker-asset-option";
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.value = asset.symbol;
+    checkbox.checked = currentSet.has(asset.symbol);
+    checkbox.className = "ticker-asset-checkbox";
+
+    checkbox.addEventListener("change", () => {
+      const newSymbols = new Set(tickerSymbols);
+      if (checkbox.checked) {
+        newSymbols.add(asset.symbol);
+      } else {
+        newSymbols.delete(asset.symbol);
+      }
+
+      // Ensure at least one asset is selected
+      if (!newSymbols.size) {
+        alert("At least one asset must be selected for the ticker.");
+        checkbox.checked = true;
+        newSymbols.add(asset.symbol);
+      }
+
+      const updated = Array.from(newSymbols);
+      saveTickerSymbols(updated);
+      refreshTickerNow();
+    });
+
+    const labelSpan = document.createElement("span");
+    labelSpan.textContent = `${asset.symbol} — ${asset.label}`;
+
+    row.appendChild(checkbox);
+    row.appendChild(labelSpan);
+    tickerSettingsContainer.appendChild(row);
+  });
+}
+
+// ===== TICKER: DATA FETCH & RENDER =====
+function getTickerAssetConfigForSymbols(symbols) {
+  const bySymbol = new Map(
+    AVAILABLE_TICKER_ASSETS.map((a) => [a.symbol, a])
+  );
+  return symbols
+    .map((sym) => bySymbol.get(sym))
+    .filter((a) => !!a);
+}
+
+async function fetchTickerData() {
+  const configs = getTickerAssetConfigForSymbols(tickerSymbols);
+  if (!configs.length) return [];
+
+  const ids = configs.map((c) => c.id).join(",");
+  const url =
+    "https://api.coingecko.com/api/v3/simple/price?vs_currencies=usd&include_24hr_change=true&ids=" +
+    encodeURIComponent(ids);
+
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      console.warn("Ticker API response not ok:", res.status);
+      return [];
+    }
+    const body = await res.json();
+
+    return configs.map((cfg) => {
+      const entry = body[cfg.id];
+      const price = entry ? entry.usd : null;
+      const change = entry ? entry.usd_24h_change : null;
+      return {
+        symbol: cfg.symbol,
+        label: cfg.label,
+        price,
+        change,
+      };
+    });
+  } catch (err) {
+    console.warn("Ticker fetch error:", err);
+    return [];
+  }
+}
+
+function renderTicker(data) {
+  if (!tickerStrip) return;
+
+  if (!data || !data.length) {
+    tickerStrip.textContent = "Ticker data unavailable.";
+    return;
+  }
+
+  const strip = document.createElement("div");
+  strip.className = "ticker-strip-inner";
+
+  data.forEach((item) => {
+    const changeClass =
+      item.change > 0 ? "positive" : item.change < 0 ? "negative" : "";
+
+    const cell = document.createElement("div");
+    cell.className = "ticker-item";
+    cell.innerHTML = `
+      <span class="ticker-symbol">${item.symbol}</span>
+      <span class="ticker-price">${formatUsd(item.price)}</span>
+      <span class="ticker-change ${changeClass}">
+        ${formatPct(item.change)}
+      </span>
+    `;
+    strip.appendChild(cell);
+  });
+
+  tickerStrip.innerHTML = "";
+  tickerStrip.appendChild(strip);
+}
+
+async function refreshTickerNow() {
+  const data = await fetchTickerData();
+  renderTicker(data);
+}
+
+function startTickerAutoRefresh() {
+  if (tickerRefreshTimer) {
+    clearInterval(tickerRefreshTimer);
+    tickerRefreshTimer = null;
+  }
+
+  // Initial fetch
+  refreshTickerNow();
+
+  // Then every 60 seconds
+  tickerRefreshTimer = setInterval(refreshTickerNow, 60_000);
+}
+
 // ===== INIT =====
 loadWallets();
 loadSafesendHistory();
+tickerSymbols = loadTickerSymbols();
 
 if (!wallets.length) {
   wallets = [
@@ -1694,5 +1742,7 @@ renderWallets();
 renderSafesendHistory();
 updateRiskGauge(null);
 updateRiskHighlightsFromEngine(null);
+renderTickerSettingsUI();
+startTickerAutoRefresh();
 setView("dashboard");
 updateAppVisibility();
