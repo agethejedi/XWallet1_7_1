@@ -1,4 +1,4 @@
-// app.js — X-Wallet + SendSafe page + Alchemy ERC-20 autodiscovery + shared Risk Engine
+// app.js — X-Wallet + SendSafe + Alchemy Sepolia + Risk Engine + Ticker + Wallet Settings
 
 if (typeof ethers === "undefined") {
   alert("Crypto library failed to load. Check the ethers.js <script> tag URL.");
@@ -9,12 +9,12 @@ if (typeof ethers === "undefined") {
 const LS_WALLETS_KEY = "xwallet_wallets_v1";
 const SS_CURRENT_ID_KEY = "xwallet_current_wallet_id_v1";
 const LS_SAFESEND_HISTORY_KEY = "xwallet_safesend_history_v1";
+const LS_TICKER_ASSETS_KEY = "xwallet_ticker_assets_v1";
 
 // Risk engine (shared with Vision)
 const RISK_ENGINE_BASE_URL =
-  "https://riskxlabs-vision-api.agedotcom.workers.dev"; // <-- your Worker URL (no trailing /)
+  "https://riskxlabs-vision-api.agedotcom.workers.dev"; // no trailing slash
 
-// Map UI network to risk engine network
 function mapNetworkForRiskEngine(uiValue) {
   switch (uiValue) {
     case "ethereum-mainnet":
@@ -39,12 +39,25 @@ function mapNetworkForRiskEngine(uiValue) {
   }
 }
 
+// ===== TICKER / WATCHLIST CONFIG =====
+const AVAILABLE_TICKER_ASSETS = [
+  { symbol: "BTC", id: "bitcoin", label: "Bitcoin" },
+  { symbol: "ETH", id: "ethereum", label: "Ethereum" },
+  { symbol: "USDT", id: "tether", label: "Tether (USDT)" },
+  { symbol: "USDC", id: "usd-coin", label: "USD Coin (USDC)" },
+  { symbol: "SOL", id: "solana", label: "Solana" },
+  { symbol: "ARB", id: "arbitrum", label: "Arbitrum" },
+  { symbol: "MATIC", id: "matic-network", label: "Polygon (MATIC)" },
+  { symbol: "LINK", id: "chainlink", label: "Chainlink" },
+];
+
+const DEFAULT_TICKER_SYMBOLS = ["BTC", "ETH", "USDT", "SOL"];
+
 // Alchemy
-const ALCHEMY_API_KEY = "kxHg5y9yBXWAb9cOcJsf0"; // <-- put your real key here
+const ALCHEMY_API_KEY = "kxHg5y9yBXWAb9cOcJsf0";
 
 function getRpcUrlForNetwork(uiValue) {
   if (!ALCHEMY_API_KEY) return null;
-
   if (uiValue === "ethereum-mainnet") {
     return `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`;
   }
@@ -60,34 +73,20 @@ function getProviderForNetwork(uiValue) {
   return new ethers.providers.JsonRpcProvider(url);
 }
 
-// Base URL for Alchemy JSON-RPC (used for ERC-20 discovery)
-function getAlchemyBaseUrl(uiValue) {
-  if (!ALCHEMY_API_KEY) return null;
-  if (uiValue === "ethereum-mainnet") {
-    return `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`;
-  }
-  if (uiValue === "sepolia") {
-    return `https://eth-sepolia.g.alchemy.com/v2/${ALCHEMY_API_KEY}`;
-  }
-  // Can extend later for other EVM networks as needed
-  return null;
-}
-
-// Simple cache for token metadata so we don't hammer Alchemy
-const tokenMetaCache = new Map(); // key: `${uiNet}:${contractAddress}`
-
 // ===== STATE =====
 let wallets = [];
 let currentWalletId = null;
 let pendingUnlockWalletId = null;
 let safesendHistory = [];
-let walletRefreshInterval = null;
+let tickerSymbols = [];
+let tickerRefreshTimer = null;
 
 // ===== DOM =====
 const walletTopbar = document.getElementById("walletTopbar");
 const walletHero = document.getElementById("walletHero");
 const walletDashboard = document.getElementById("walletDashboard");
 const safesendPage = document.getElementById("safesendPage");
+const settingsPage = document.getElementById("settingsPage");
 
 const walletAddressEl = document.getElementById("walletAddress");
 const fiatBalanceLabelEl = document.getElementById("fiatBalanceLabel");
@@ -147,14 +146,12 @@ const riskGaugeLabel = document.getElementById("riskGaugeLabel");
 const riskHighlightsList = document.getElementById("riskHighlightsList");
 const recipientInput = document.getElementById("recipientInput");
 const runSafeSendBtn = document.getElementById("runSafeSendBtn");
-const clearSafesendHistoryBtn = document.getElementById(
-  "clearSafesendHistoryBtn"
-);
+const clearSafesendHistoryBtn = document.getElementById("clearSafesendHistoryBtn");
 const safesendHistoryList = document.getElementById("safesendHistoryList");
 const viewFullReportBtn = document.getElementById("viewFullReportBtn");
 const safesendTxList = document.getElementById("safesendTxList");
 
-// Selected holding balance + amount fields
+// SendSafe balance / amount
 const ssBalanceAmountEl = document.getElementById("ssBalanceAmount");
 const ssBalanceUsdEl = document.getElementById("ssBalanceUsd");
 const ssSendAmountEl = document.getElementById("ssSendAmount");
@@ -166,11 +163,14 @@ const modalRiskGaugeDial = document.getElementById("modalRiskGaugeDial");
 const modalRiskGaugeLabel = document.getElementById("modalRiskGaugeLabel");
 const safesendResultMessage = document.getElementById("safesendResultMessage");
 const safesendRiskAckRow = document.getElementById("safesendRiskAckRow");
-const safesendRiskAckCheckbox = document.getElementById(
-  "safesendRiskAckCheckbox"
-);
+const safesendRiskAckCheckbox = document.getElementById("safesendRiskAckCheckbox");
 const safesendRiskAckText = document.getElementById("safesendRiskAckText");
 const safesendResultButtons = document.getElementById("safesendResultButtons");
+
+// Ticker / settings
+const tickerStrip = document.getElementById("tickerStrip");
+const tickerSettingsContainer = document.getElementById("tickerSettingsContainer");
+const walletSettingsList = document.getElementById("walletSettingsList");
 
 // ===== UTIL =====
 function formatPct(p) {
@@ -240,133 +240,32 @@ function loadSafesendHistory() {
 }
 
 function saveSafesendHistory() {
-  localStorage.setItem(
-    LS_SAFESEND_HISTORY_KEY,
-    JSON.stringify(safesendHistory)
-  );
+  localStorage.setItem(LS_SAFESEND_HISTORY_KEY, JSON.stringify(safesendHistory));
 }
 
 function getWalletById(id) {
   return wallets.find((w) => w.id === id);
 }
 
-// ===== ERC-20 AUTODISCOVERY (Alchemy) =====
-async function fetchTokenMetadata(contractAddress, uiNetwork) {
-  const base = getAlchemyBaseUrl(uiNetwork);
-  if (!base) return null;
-  const key = `${uiNetwork}:${contractAddress.toLowerCase()}`;
-  if (tokenMetaCache.has(key)) {
-    return tokenMetaCache.get(key);
-  }
-
+function loadTickerSymbols() {
   try {
-    const body = {
-      id: 1,
-      jsonrpc: "2.0",
-      method: "alchemy_getTokenMetadata",
-      params: [contractAddress],
-    };
-    const res = await fetch(base, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      console.warn("Token metadata failed", res.status, contractAddress);
-      tokenMetaCache.set(key, null);
-      return null;
+    const raw = localStorage.getItem(LS_TICKER_ASSETS_KEY);
+    const arr = raw ? JSON.parse(raw) : null;
+    if (Array.isArray(arr) && arr.length) {
+      return arr.filter((s) => typeof s === "string");
     }
-    const json = await res.json();
-    const meta = json.result || null;
-    tokenMetaCache.set(key, meta);
-    return meta;
-  } catch (err) {
-    console.warn("Token metadata error", err);
-    const key2 = `${uiNetwork}:${contractAddress.toLowerCase()}`;
-    tokenMetaCache.set(key2, null);
-    return null;
+  } catch {
+    // ignore
   }
+  return DEFAULT_TICKER_SYMBOLS.slice();
 }
 
-// Discover ERC-20 balances for a wallet on the given network
-async function fetchErc20Balances(address, uiNetwork) {
-  const base = getAlchemyBaseUrl(uiNetwork);
-  if (!base) return [];
-
-  try {
-    const body = {
-      id: 1,
-      jsonrpc: "2.0",
-      method: "alchemy_getTokenBalances",
-      params: [address, "erc20"],
-    };
-    const res = await fetch(base, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      console.warn("alchemy_getTokenBalances failed", res.status);
-      return [];
-    }
-    const json = await res.json();
-    const tokenBalances = json?.result?.tokenBalances || [];
-
-    // Filter to non-zero balances
-    const nonZero = tokenBalances.filter((t) => {
-      const raw = t.tokenBalance;
-      if (!raw) return false;
-      try {
-        const bn = BigInt(raw);
-        return bn !== 0n;
-      } catch {
-        return raw !== "0x0" && raw !== "0x";
-      }
-    });
-
-    const holdings = [];
-    for (const t of nonZero) {
-      const contract = t.contractAddress;
-      const raw = t.tokenBalance;
-      if (!contract || !raw) continue;
-
-      const meta = await fetchTokenMetadata(contract, uiNetwork);
-      const decimals =
-        (meta && typeof meta.decimals === "number" ? meta.decimals : 18) || 18;
-      const symbol = meta?.symbol || "TOKEN";
-      const name = meta?.name || contract;
-
-      let amount = 0;
-      try {
-        amount = parseFloat(ethers.utils.formatUnits(raw, decimals));
-      } catch {
-        amount = 0;
-      }
-
-      // Prototype: treat 1 token = 1 USD (including testnet) so UI has a value.
-      // Later we can wire in real pricing.
-      const usdValue = amount;
-
-      holdings.push({
-        symbol,
-        name,
-        logoUrl:
-          meta?.logo || "https://cryptologos.cc/logos/ethereum-eth-logo.png?v=032",
-        amount,
-        usdValue,
-        change24hPct: 0,
-        tokenAddress: contract,
-      });
-    }
-
-    return holdings;
-  } catch (err) {
-    console.warn("fetchErc20Balances error", err);
-    return [];
-  }
+function saveTickerSymbols(symbols) {
+  tickerSymbols = symbols.slice();
+  localStorage.setItem(LS_TICKER_ASSETS_KEY, JSON.stringify(tickerSymbols));
 }
 
-// ===== LIVE BALANCES (native + ERC-20) =====
+// ===== LIVE BALANCES (Alchemy) =====
 async function refreshWalletOnChainData() {
   const wallet = getWalletById(currentWalletId);
   if (!wallet || !networkSelect) return;
@@ -383,11 +282,7 @@ async function refreshWalletOnChainData() {
       networkStatusPill.textContent = "RPC: DISCONNECTED";
       networkStatusPill.classList.add("status-pill-bad");
     }
-    console.warn(
-      "No provider for network",
-      uiNet,
-      "- did you set ALCHEMY_API_KEY?"
-    );
+    console.warn("No provider for network", uiNet, "- did you set ALCHEMY_API_KEY?");
     return;
   }
 
@@ -396,39 +291,23 @@ async function refreshWalletOnChainData() {
   }
 
   try {
-    const [rawNative, erc20Holdings] = await Promise.all([
-      provider.getBalance(wallet.address),
-      fetchErc20Balances(wallet.address, uiNet),
-    ]);
+    const raw = await provider.getBalance(wallet.address);
+    const eth = Number(ethers.utils.formatEther(raw));
 
-    const eth = Number(ethers.utils.formatEther(rawNative));
     const isSepolia = uiNet === "sepolia";
-
-    const holdings = [];
-
-    // Native asset
-    holdings.push({
-      symbol: isSepolia ? "ETH-sep" : "ETH",
-      name: isSepolia ? "Ethereum (Sepolia)" : "Ethereum",
-      logoUrl: "https://cryptologos.cc/logos/ethereum-eth-logo.png?v=032",
-      amount: eth,
-      // Prototype: treat 1 native unit = 1 USD equivalent for now
-      usdValue: eth,
-      change24hPct: 0,
-      tokenAddress: null,
-    });
-
-    // ERC-20 tokens discovered via Alchemy
-    holdings.push(...erc20Holdings);
-
-    let totalUsd = 0;
-    for (const h of holdings) {
-      totalUsd += h.usdValue || 0;
-    }
-
-    wallet.totalUsd = totalUsd;
+    wallet.totalUsd = eth;
     wallet.change24hPct = 0;
-    wallet.holdings = holdings;
+    wallet.holdings = [
+      {
+        symbol: isSepolia ? "ETH-sep" : "ETH",
+        name: isSepolia ? "Ethereum (Sepolia)" : "Ethereum",
+        logoUrl: "https://cryptologos.cc/logos/ethereum-eth-logo.png?v=032",
+        amount: eth,
+        usdValue: eth,
+        change24hPct: 0,
+        tokenAddress: null,
+      },
+    ];
 
     saveWallets();
     renderWallets();
@@ -473,6 +352,7 @@ function updateAppVisibility() {
     if (walletHero) walletHero.hidden = true;
     if (walletDashboard) walletDashboard.hidden = true;
     if (safesendPage) safesendPage.hidden = true;
+    if (settingsPage) settingsPage.hidden = true;
 
     showWalletHub();
     if (walletsNavBtn) walletsNavBtn.classList.add("nav-item-attention");
@@ -489,17 +369,9 @@ function setCurrentWallet(id, { refreshOnChain = false } = {}) {
   refreshHeader();
   updateAppVisibility();
   populateSafesendSelectors();
-
-  if (walletRefreshInterval) {
-    clearInterval(walletRefreshInterval);
-    walletRefreshInterval = null;
-  }
-
-  if (id && refreshOnChain) {
+  renderWalletSettingsUI();
+  if (refreshOnChain) {
     refreshWalletOnChainData();
-    walletRefreshInterval = setInterval(() => {
-      refreshWalletOnChainData();
-    }, 60_000);
   }
 }
 
@@ -520,6 +392,10 @@ function setView(view) {
     safesendPage.hidden = true;
     safesendPage.classList.remove("active-view");
   }
+  if (settingsPage) {
+    settingsPage.hidden = true;
+    settingsPage.classList.remove("active-view");
+  }
 
   if (!hasUnlocked) {
     updateAppVisibility();
@@ -529,6 +405,9 @@ function setView(view) {
   if (view === "safesend" && safesendPage) {
     safesendPage.hidden = false;
     safesendPage.classList.add("active-view");
+  } else if (view === "settings" && settingsPage) {
+    settingsPage.hidden = false;
+    settingsPage.classList.add("active-view");
   } else if (walletDashboard) {
     walletDashboard.hidden = false;
     walletDashboard.classList.add("active-view");
@@ -682,9 +561,10 @@ function renderWallets() {
   fiatBalanceLabelEl.textContent = formatUsd(total);
   refreshHeader();
   populateSafesendSelectors();
+  renderWalletSettingsUI();
 }
 
-// Accordion open/close (no re-render here)
+// Accordion
 if (walletsContainer) {
   walletsContainer.addEventListener("click", (e) => {
     const header = e.target.closest(".wallet-header");
@@ -705,7 +585,7 @@ if (walletsContainer) {
   });
 }
 
-// Action menu + SendSafe
+// Action menu
 document.addEventListener("click", (e) => {
   if (!e.target.closest(".holding-action")) {
     document
@@ -747,7 +627,7 @@ document.addEventListener("click", (e) => {
   }
 });
 
-// ===== SENDSAFE SELECTORS & BALANCE DISPLAY =====
+// ===== SENDSAFE SELECTORS & BALANCE =====
 function populateSafesendSelectors() {
   if (!ssWalletSelect || !ssAssetSelect) return;
 
@@ -760,7 +640,7 @@ function populateSafesendSelectors() {
   if (!wallets.length) {
     ssWalletSelect.innerHTML = `<option value="">No wallets yet</option>`;
     ssAssetSelect.innerHTML = `<option value="">No holdings</option>`;
-    updateSelectedHoldingBalance(null);
+    updateSafesendSelectedBalance(null, null);
     return;
   }
 
@@ -787,7 +667,7 @@ function populateAssetsForWallet(walletId, prevAssetKey) {
   const wallet = getWalletById(walletId);
   if (!wallet || !wallet.holdings.length) {
     ssAssetSelect.innerHTML = `<option value="">No holdings</option>`;
-    updateSelectedHoldingBalance(null);
+    updateSafesendSelectedBalance(null, null);
     return;
   }
 
@@ -799,42 +679,51 @@ function populateAssetsForWallet(walletId, prevAssetKey) {
     ssAssetSelect.appendChild(opt);
   });
 
-  let finalKey = prevAssetKey;
-  if (!finalKey || ![...ssAssetSelect.options].some((o) => o.value === finalKey)) {
-    finalKey = `${wallet.id}:0`;
+  let selectedKey;
+  if (prevAssetKey && [...ssAssetSelect.options].some((o) => o.value === prevAssetKey)) {
+    selectedKey = prevAssetKey;
+  } else {
+    selectedKey = `${wallet.id}:0`;
   }
-  ssAssetSelect.value = finalKey;
-
-  const holding = getHoldingFromSelectorValue(finalKey);
-  updateSelectedHoldingBalance(holding);
+  ssAssetSelect.value = selectedKey;
+  updateSafesendBalanceForSelection();
 }
 
-function getHoldingFromSelectorValue(assetKey) {
-  if (!assetKey || !assetKey.includes(":")) return null;
-  const [walletId, idxStr] = assetKey.split(":");
-  const w = getWalletById(walletId);
-  if (!w) return null;
-  const idx = Number(idxStr);
-  if (!Array.isArray(w.holdings) || idx < 0 || idx >= w.holdings.length) {
-    return null;
-  }
-  return w.holdings[idx];
-}
-
-function updateSelectedHoldingBalance(holding) {
+function updateSafesendSelectedBalance(wallet, holding) {
   if (!ssBalanceAmountEl || !ssBalanceUsdEl) return;
 
-  if (!holding) {
+  if (!wallet || !holding) {
     ssBalanceAmountEl.textContent = "--";
     ssBalanceUsdEl.textContent = "--";
-    if (ssSendAmountEl) ssSendAmountEl.value = "";
     return;
   }
 
   ssBalanceAmountEl.textContent = `${holding.amount} ${holding.symbol}`;
   ssBalanceUsdEl.textContent = formatUsd(holding.usdValue || 0);
+}
 
-  if (ssSendAmountEl) ssSendAmountEl.value = "";
+function updateSafesendBalanceForSelection() {
+  const walletId = ssWalletSelect ? ssWalletSelect.value : null;
+  const assetKey = ssAssetSelect ? ssAssetSelect.value : null;
+  if (!walletId || !assetKey || !assetKey.includes(":")) {
+    updateSafesendSelectedBalance(null, null);
+    return;
+  }
+
+  const wallet = getWalletById(walletId);
+  if (!wallet) {
+    updateSafesendSelectedBalance(null, null);
+    return;
+  }
+
+  const idx = Number(assetKey.split(":")[1]);
+  const holding = wallet.holdings && wallet.holdings[idx];
+  if (!holding) {
+    updateSafesendSelectedBalance(null, null);
+    return;
+  }
+
+  updateSafesendSelectedBalance(wallet, holding);
 }
 
 if (ssWalletSelect) {
@@ -844,9 +733,8 @@ if (ssWalletSelect) {
 }
 
 if (ssAssetSelect) {
-  ssAssetSelect.addEventListener("change", (e) => {
-    const holding = getHoldingFromSelectorValue(e.target.value);
-    updateSelectedHoldingBalance(holding);
+  ssAssetSelect.addEventListener("change", () => {
+    updateSafesendBalanceForSelection();
   });
 }
 
@@ -888,10 +776,8 @@ function updateRiskGauge(score) {
   const level = classifyScore(score);
   safesendScoreBadge.className = "risk-badge";
   if (level === "good") safesendScoreBadge.classList.add("risk-badge-good");
-  else if (level === "warn")
-    safesendScoreBadge.classList.add("risk-badge-warn");
-  else if (level === "bad")
-    safesendScoreBadge.classList.add("risk-badge-bad");
+  else if (level === "warn") safesendScoreBadge.classList.add("risk-badge-warn");
+  else if (level === "bad") safesendScoreBadge.classList.add("risk-badge-bad");
   else safesendScoreBadge.classList.add("risk-badge-neutral");
 }
 
@@ -1016,7 +902,6 @@ async function fetchRecentTxForAddress(address, uiNetwork) {
   }
 }
 
-// Side-by-side recent transactions: recipient vs sender
 async function loadRecentTransactions(fromAddress, toAddress, uiNetwork) {
   if (!safesendTxList) return;
 
@@ -1032,7 +917,7 @@ async function loadRecentTransactions(fromAddress, toAddress, uiNetwork) {
     const wrapper = document.createElement("div");
     wrapper.className = "safesend-tx-columns";
 
-    // ── Recipient column ─────────────────────────────
+    // Recipient column
     const recipCol = document.createElement("div");
     recipCol.className = "safesend-tx-column";
 
@@ -1061,7 +946,7 @@ async function loadRecentTransactions(fromAddress, toAddress, uiNetwork) {
       recipCol.appendChild(empty);
     }
 
-    // ── Sender column (with direction) ───────────────
+    // Sender column
     const senderCol = document.createElement("div");
     senderCol.className = "safesend-tx-column";
 
@@ -1134,11 +1019,7 @@ function updateModalGauge(score) {
   if (!modalRiskGaugeDial || !modalRiskGaugeLabel) return;
 
   modalRiskGaugeDial.classList.remove("good", "warn", "bad");
-  if (
-    score === null ||
-    score === undefined ||
-    Number.isNaN(score)
-  ) {
+  if (score === null || score === undefined || Number.isNaN(score)) {
     modalRiskGaugeLabel.textContent = "--";
     return;
   }
@@ -1159,7 +1040,6 @@ function showSafesendResultModal(score) {
   safesendResultButtons.innerHTML = "";
 
   if (score >= 90) {
-    // Hard deny
     safesendResultMessage.textContent =
       "This transaction is being denied due to elevated risks associated with government sanctions, concerning patterns of activity or reports of fraud.";
 
@@ -1172,7 +1052,6 @@ function showSafesendResultModal(score) {
 
     safesendResultButtons.appendChild(backBtn);
   } else if (score >= 60) {
-    // High risk – waiver
     safesendResultMessage.textContent =
       "This transaction represents a higher than normal amount of risk. Should you choose to proceed with the transaction you assume any risks associated with the transaction. Neither RiskXLabs, SendSafe nor our affiliates will be responsible for the reclamation or recovery of funds sent to this address now or in the future.";
 
@@ -1195,14 +1074,10 @@ function showSafesendResultModal(score) {
     const onChange = () => {
       completeBtn.disabled = !safesendRiskAckCheckbox.checked;
     };
-    safesendRiskAckCheckbox.addEventListener("change", onChange, {
-      once: false,
-    });
+    safesendRiskAckCheckbox.addEventListener("change", onChange);
 
     completeBtn.addEventListener("click", () => {
-      alert(
-        "Prototype: this is where the transaction would be submitted."
-      );
+      alert("Prototype: this is where the transaction would be submitted.");
       closeModal(safesendResultModal);
       safesendRiskAckCheckbox.removeEventListener("change", onChange);
     });
@@ -1210,7 +1085,6 @@ function showSafesendResultModal(score) {
     safesendResultButtons.appendChild(cancelBtn);
     safesendResultButtons.appendChild(completeBtn);
   } else {
-    // Normal risk band
     safesendResultMessage.textContent =
       "This transaction falls within normal risk bands according to SendSafe. You may proceed, or cancel if you have doubts.";
 
@@ -1225,9 +1099,7 @@ function showSafesendResultModal(score) {
     completeBtn.className = "primary-btn";
     completeBtn.textContent = "Complete transaction";
     completeBtn.addEventListener("click", () => {
-      alert(
-        "Prototype: this is where the transaction would be submitted."
-      );
+      alert("Prototype: this is where the transaction would be submitted.");
       closeModal(safesendResultModal);
     });
 
@@ -1261,10 +1133,13 @@ if (runSafeSendBtn) {
     let assetSymbol = "";
     let amountUsd = null;
 
-    const holding = getHoldingFromSelectorValue(assetKey);
-    if (holding) {
-      assetSymbol = holding.symbol;
-      amountUsd = holding.usdValue ?? null;
+    if (wallet && assetKey && assetKey.includes(":")) {
+      const idx = Number(assetKey.split(":")[1]);
+      const holding = wallet.holdings[idx];
+      if (holding) {
+        assetSymbol = holding.symbol;
+        amountUsd = holding.usdValue ?? null;
+      }
     }
 
     runSafeSendBtn.disabled = true;
@@ -1276,7 +1151,6 @@ if (runSafeSendBtn) {
         ? networkSelect.value
         : "ethereum-mainnet";
 
-      // Load recent tx (doesn't block risk)
       loadRecentTransactions(
         wallet ? wallet.address : null,
         address,
@@ -1317,8 +1191,7 @@ if (runSafeSendBtn) {
         return;
       }
 
-      const score =
-        engineResult.score ?? engineResult.risk_score ?? null;
+      const score = engineResult.score ?? engineResult.risk_score ?? null;
 
       updateRiskGauge(score);
       updateRiskHighlightsFromEngine(engineResult);
@@ -1612,9 +1485,7 @@ uwConfirmBtn.addEventListener("click", () => {
 if (networkSelect) {
   networkSelect.addEventListener("change", (e) => {
     console.log("Network changed to:", e.target.value);
-    if (currentWalletId) {
-      refreshWalletOnChainData();
-    }
+    refreshWalletOnChainData();
   });
 }
 
@@ -1660,12 +1531,194 @@ if (sendBtn) {
   });
 }
 
+// ===== SETTINGS: WALLET LABELS =====
+function renderWalletSettingsUI() {
+  if (!walletSettingsList) return;
+
+  walletSettingsList.innerHTML = "";
+
+  if (!wallets.length) {
+    const empty = document.createElement("div");
+    empty.className = "settings-empty";
+    empty.textContent = "No wallets on this device yet.";
+    walletSettingsList.appendChild(empty);
+    return;
+  }
+
+  wallets.forEach((w) => {
+    const row = document.createElement("div");
+    row.className = "wallet-settings-row";
+    row.innerHTML = `
+      <div class="wallet-settings-address">${shorten(w.address, 10, 6)}</div>
+      <input
+        class="input wallet-label-input"
+        data-wallet-id="${w.id}"
+        value="${w.label}"
+      />
+    `;
+    walletSettingsList.appendChild(row);
+  });
+}
+
+if (walletSettingsList) {
+  walletSettingsList.addEventListener("change", (e) => {
+    const input = e.target.closest(".wallet-label-input");
+    if (!input) return;
+    const id = input.dataset.walletId;
+    const wallet = getWalletById(id);
+    if (!wallet) return;
+
+    const newLabel = input.value.trim() || "Wallet";
+    wallet.label = newLabel;
+    saveWallets();
+    renderWallets();
+    populateSafesendSelectors();
+    renderWalletSettingsUI();
+  });
+}
+
+// ===== SETTINGS: TICKER UI =====
+function renderTickerSettingsUI() {
+  if (!tickerSettingsContainer) return;
+
+  tickerSettingsContainer.innerHTML = "";
+
+  const currentSet = new Set(tickerSymbols);
+
+  AVAILABLE_TICKER_ASSETS.forEach((asset) => {
+    const row = document.createElement("label");
+    row.className = "ticker-asset-option";
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.value = asset.symbol;
+    checkbox.checked = currentSet.has(asset.symbol);
+    checkbox.className = "ticker-asset-checkbox";
+
+    checkbox.addEventListener("change", () => {
+      const newSymbols = new Set(tickerSymbols);
+      if (checkbox.checked) {
+        newSymbols.add(asset.symbol);
+      } else {
+        newSymbols.delete(asset.symbol);
+      }
+
+      if (!newSymbols.size) {
+        alert("At least one asset must be selected for the ticker.");
+        checkbox.checked = true;
+        newSymbols.add(asset.symbol);
+      }
+
+      const updated = Array.from(newSymbols);
+      saveTickerSymbols(updated);
+      refreshTickerNow();
+    });
+
+    const labelSpan = document.createElement("span");
+    labelSpan.textContent = `${asset.symbol} — ${asset.label}`;
+
+    row.appendChild(checkbox);
+    row.appendChild(labelSpan);
+    tickerSettingsContainer.appendChild(row);
+  });
+}
+
+// ===== TICKER: DATA =====
+function getTickerAssetConfigForSymbols(symbols) {
+  const bySymbol = new Map(
+    AVAILABLE_TICKER_ASSETS.map((a) => [a.symbol, a])
+  );
+  return symbols
+    .map((sym) => bySymbol.get(sym))
+    .filter((a) => !!a);
+}
+
+async function fetchTickerData() {
+  const configs = getTickerAssetConfigForSymbols(tickerSymbols);
+  if (!configs.length) return [];
+
+  const ids = configs.map((c) => c.id).join(",");
+  const url =
+    "https://api.coingecko.com/api/v3/simple/price" +
+    "?vs_currencies=usd&include_24hr_change=true&ids=" +
+    encodeURIComponent(ids);
+
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      console.warn("Ticker API response not ok:", res.status);
+      return [];
+    }
+    const body = await res.json();
+
+    return configs.map((cfg) => {
+      const entry = body[cfg.id];
+      const price = entry ? entry.usd : null;
+      const change = entry ? entry.usd_24h_change : null;
+      return {
+        symbol: cfg.symbol,
+        label: cfg.label,
+        price,
+        change,
+      };
+    });
+  } catch (err) {
+    console.warn("Ticker fetch error:", err);
+    return [];
+  }
+}
+
+function renderTicker(data) {
+  if (!tickerStrip) return;
+
+  if (!data || !data.length) {
+    tickerStrip.textContent = "Ticker data unavailable.";
+    return;
+  }
+
+  const strip = document.createElement("div");
+  strip.className = "ticker-strip-inner";
+
+  data.forEach((item) => {
+    const changeClass =
+      item.change > 0 ? "positive" : item.change < 0 ? "negative" : "";
+
+    const cell = document.createElement("div");
+    cell.className = "ticker-item";
+    cell.innerHTML = `
+      <span class="ticker-symbol">${item.symbol}</span>
+      <span class="ticker-price">${formatUsd(item.price)}</span>
+      <span class="ticker-change ${changeClass}">
+        ${formatPct(item.change)}
+      </span>
+    `;
+    strip.appendChild(cell);
+  });
+
+  tickerStrip.innerHTML = "";
+  tickerStrip.appendChild(strip);
+}
+
+async function refreshTickerNow() {
+  const data = await fetchTickerData();
+  renderTicker(data);
+}
+
+function startTickerAutoRefresh() {
+  if (tickerRefreshTimer) {
+    clearInterval(tickerRefreshTimer);
+    tickerRefreshTimer = null;
+  }
+  refreshTickerNow();
+  tickerRefreshTimer = setInterval(refreshTickerNow, 60_000);
+}
+
 // ===== INIT =====
 loadWallets();
 loadSafesendHistory();
+tickerSymbols = loadTickerSymbols();
 
 if (!wallets.length) {
-  // Demo wallet so the UI isn't empty on first load
   wallets = [
     {
       id: "demo",
@@ -1687,8 +1740,7 @@ if (!wallets.length) {
         {
           symbol: "USDC",
           name: "USD Coin",
-          logoUrl:
-            "https://cryptologos.cc/logos/usd-coin-usdc-logo.png?v=032",
+          logoUrl: "https://cryptologos.cc/logos/usd-coin-usdc-logo.png?v=032",
           amount: 100,
           usdValue: 100,
           change24hPct: 0.0,
@@ -1705,5 +1757,8 @@ renderWallets();
 renderSafesendHistory();
 updateRiskGauge(null);
 updateRiskHighlightsFromEngine(null);
+renderWalletSettingsUI();
+renderTickerSettingsUI();
+startTickerAutoRefresh();
 setView("dashboard");
 updateAppVisibility();
