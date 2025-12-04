@@ -1789,3 +1789,97 @@ body {
 .settings-wallet-save {
   align-self: center;
 }
+/* Ticker strip */
+.panel-ticker {
+  margin-top: 1.5rem;
+}
+
+.ticker-strip {
+  position: relative;
+  overflow: hidden;
+  white-space: nowrap;
+  min-height: 32px;
+}
+
+.ticker-strip-inner {
+  display: inline-block;
+  white-space: nowrap;
+  animation: ticker-scroll 30s linear infinite;
+}
+
+.ticker-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  margin-right: 2rem;
+  font-size: 0.9rem;
+}
+
+.ticker-symbol {
+  font-weight: 600;
+}
+
+.ticker-price {
+  opacity: 0.9;
+}
+
+.ticker-change.positive {
+  color: #38c172; /* green-ish */
+}
+
+.ticker-change.negative {
+  color: #e3342f; /* red-ish */
+}
+
+@keyframes ticker-scroll {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+/* Settings: wallet labels & ticker */
+.settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.settings-section {
+  border-top: 1px solid rgba(255,255,255,0.08);
+  padding-top: 1rem;
+}
+
+.wallet-settings-list,
+.ticker-settings-container {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.wallet-settings-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 2fr);
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.wallet-settings-address {
+  font-family: monospace;
+  font-size: 0.85rem;
+  opacity: 0.8;
+}
+
+.ticker-asset-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.ticker-asset-option input[type="checkbox"] {
+  accent-color: #00e6ff;
+}
