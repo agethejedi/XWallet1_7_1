@@ -56,34 +56,6 @@ const DEFAULT_TICKER_SYMBOLS = ["BTC", "ETH", "USDT", "SOL"];
 // Alchemy
 const ALCHEMY_API_KEY = "kxHg5y9yBXWAb9cOcJsf0";
 
-// Token logo URLs (cryptologos)
-const TOKEN_LOGO_URLS = {
-  ETH:  "https://cryptologos.cc/logos/ethereum-eth-logo.svg?v=040",
-  "ETH-sep": "https://cryptologos.cc/logos/ethereum-eth-logo.svg?v=040",
-
-  USDC: "https://cryptologos.cc/logos/usd-coin-usdc-logo.svg?v=040",
-  USDT: "https://cryptologos.cc/logos/tether-usdt-logo.svg?v=040",
-  SOL:  "https://cryptologos.cc/logos/solana-sol-logo.svg?v=040",
-  PYUSD:"https://cryptologos.cc/logos/paypal-usd-pyusd-logo.svg?v=040",
-
-  ADA:  "https://cryptologos.cc/logos/cardano-ada-logo.svg?v=040",
-  LTC:  "https://cryptologos.cc/logos/litecoin-ltc-logo.svg?v=040",
-  CRO:  "https://cryptologos.cc/logos/cronos-cro-logo.svg?v=040",
-  TRX:  "https://cryptologos.cc/logos/tron-trx-logo.svg?v=040",
-  XLM:  "https://cryptologos.cc/logos/stellar-xlm-logo.svg?v=040",
-  MATIC:"https://cryptologos.cc/logos/polygon-matic-logo.svg?v=040",
-  OP:   "https://cryptologos.cc/logos/optimism-ethereum-op-logo.svg?v=040",
-  XYO:  "https://cryptologos.cc/logos/xyo-xyo-logo.svg?v=040",
-};
-
-const DEFAULT_TOKEN_LOGO_URL =
-  "https://cryptologos.cc/logos/ethereum-eth-logo.svg?v=040";
-
-function getTokenLogoUrl(symbol) {
-  const key = (symbol || "").toUpperCase();
-  return TOKEN_LOGO_URLS[key] || DEFAULT_TOKEN_LOGO_URL;
-}
-
 // Known tokens (for nicer names/logos on top of generic ERC-20 metadata)
 const KNOWN_TOKENS_BY_ADDRESS = {
   // PYUSD mainnet
@@ -419,20 +391,16 @@ async function refreshWalletOnChainData() {
     const eth = Number(ethers.utils.formatEther(rawEth));
     const isSepolia = uiNet === "sepolia";
 
-   const isSepolia = uiNet === "sepolia";
-wallet.totalUsd = eth;
-wallet.change24hPct = 0;
-wallet.holdings = [
-  {
-    symbol: isSepolia ? "ETH-sep" : "ETH",
-    name: isSepolia ? "Ethereum (Sepolia)" : "Ethereum",
-    logoUrl: getTokenLogoUrl(isSepolia ? "ETH-sep" : "ETH"),
-    amount: eth,
-    usdValue: eth,
-    change24hPct: 0,
-    tokenAddress: null,
-  },
-];
+    holdings.push({
+      symbol: isSepolia ? "ETH-sep" : "ETH",
+      name: isSepolia ? "Ethereum (Sepolia)" : "Ethereum",
+      logoUrl: "https://cryptologos.cc/logos/ethereum-eth-logo.png?v=032",
+      amount: eth,
+      // For now we treat 1 ETH = 1 "USD unit" in this prototype. Later this can hook into live prices.
+      usdValue: eth,
+      change24hPct: 0,
+      tokenAddress: null,
+    });
 
     // 2) All ERC-20s (including PYUSD) via Alchemy
     const erc20Holdings = await fetchAllErc20Holdings(provider, wallet.address);
